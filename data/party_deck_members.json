@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "party_deck_members": [
+    {"deck_id": 1, "ws1_player_character_id": 2, "ws1_uniform_number": 4, "ws2_player_character_id": 6, "ws2_uniform_number": 5, "mb1_player_character_id": 3, "mb1_uniform_number": 7, "mb2_player_character_id": 7, "mb2_uniform_number": 9, "op_player_character_id": 4, "op_uniform_number": 11, "se_player_character_id": 1, "se_uniform_number": 1, "li_player_character_id": 5, "li_uniform_number": 2, "rotation_start_position": 1},
+    {"deck_id": 2, "ws1_player_character_id": 8, "ws1_uniform_number": 3, "ws2_player_character_id": 9, "ws2_uniform_number": 6, "mb1_player_character_id": null, "mb1_uniform_number": null, "mb2_player_character_id": null, "mb2_uniform_number": null, "op_player_character_id": null, "op_uniform_number": null, "se_player_character_id": 11, "se_uniform_number": 8, "li_player_character_id": 10, "li_uniform_number": 13, "rotation_start_position": 1},
+    {"deck_id": 3, "ws1_player_character_id": 13, "ws1_uniform_number": 4, "ws2_player_character_id": 16, "ws2_uniform_number": 6, "mb1_player_character_id": 15, "mb1_uniform_number": 8, "mb2_player_character_id": 19, "mb2_uniform_number": 12, "op_player_character_id": 18, "op_uniform_number": 10, "se_player_character_id": 14, "se_uniform_number": 1, "li_player_character_id": 17, "li_uniform_number": 2, "rotation_start_position": 1}
+  ]
+}

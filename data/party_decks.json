@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "party_decks": [
+    {"deck_id": 1, "player_id": 1, "deck_number": 1},
+    {"deck_id": 2, "player_id": 1, "deck_number": 2},
+    {"deck_id": 3, "player_id": 2, "deck_number": 1}
+  ]
+}

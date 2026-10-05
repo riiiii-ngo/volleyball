@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "items": [
+    {"item_id": "i_coin", "item_type": "coin", "item_name": "コイン"},
+    {"item_id": "i_scout_ticket", "item_type": "gacha_ticket", "item_name": "スカウトチケット"},
+    {"item_id": "i_premium_ticket", "item_type": "gacha_ticket", "item_name": "★4以上確定スカウトチケット"},
+    {"item_id": "i_practice_token", "item_type": "token", "item_name": "練習トークン"}
+  ]
+}

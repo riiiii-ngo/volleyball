@@ -1,0 +1,360 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "volleyball/schema.json",
+  "title": "Volleyball game database",
+  "description": "全テーブルのJSON Schema。トップレベルはテーブル名→レコード配列。各テーブル定義($defs)の x-table / x-primaryKey / x-foreignKeys / x-unique / x-dbType はRDB移行用の注釈(JSON Schemaの検証では無視される)。対応するDDLは create_tables.sql、TypeScript型は types.ts。",
+  "type": "object",
+  "properties": {
+    "players": { "type": "array", "items": { "$ref": "#/$defs/players" } },
+    "characters": { "type": "array", "items": { "$ref": "#/$defs/characters" } },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/items" } },
+    "shop_items": { "type": "array", "items": { "$ref": "#/$defs/shop_items" } },
+    "player_items": { "type": "array", "items": { "$ref": "#/$defs/player_items" } },
+    "player_characters": { "type": "array", "items": { "$ref": "#/$defs/player_characters" } },
+    "party_decks": { "type": "array", "items": { "$ref": "#/$defs/party_decks" } },
+    "party_deck_members": { "type": "array", "items": { "$ref": "#/$defs/party_deck_members" } },
+    "gachas": { "type": "array", "items": { "$ref": "#/$defs/gachas" } },
+    "gacha_details": { "type": "array", "items": { "$ref": "#/$defs/gacha_details" } }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "masterId": {
+      "description": "マスタのID。手書きで管理する文字列コード(例: c001)。",
+      "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$", "x-dbType": "VARCHAR(32)"
+    },
+    "serialId": {
+      "description": "ゲーム中に発行されるID(DBの自動採番)。",
+      "type": "integer", "minimum": 1, "x-dbType": "BIGINT"
+    },
+    "amount": {
+      "description": "0以上の数量(通貨・値段など)。",
+      "type": "integer", "minimum": 0, "x-dbType": "INTEGER"
+    },
+    "stat": {
+      "description": "ステータス値。",
+      "type": "integer", "minimum": 0, "x-dbType": "INTEGER"
+    },
+    "datetime": {
+      "description": "タイムゾーン付きISO 8601(例: 2026-10-05T12:00:00+09:00)。",
+      "type": "string", "format": "date-time", "x-dbType": "TIMESTAMPTZ"
+    },
+    "position": {
+      "description": "ポジション。WS=ウイングスパイカー, MB=ミドルブロッカー, OP=オポジット, SE=セッター, LI=リベロ。",
+      "type": "string", "enum": ["WS", "MB", "OP", "SE", "LI"], "x-dbType": "VARCHAR(2)"
+    },
+    "itemType": {
+      "description": "アイテム種別コード。coin=コイン, token=トークン(交換所用), gacha_ticket=ガチャチケット。必要に応じて追加する。",
+      "type": "string", "enum": ["coin", "token", "gacha_ticket"], "x-dbType": "VARCHAR(32)"
+    },
+    "currencyType": {
+      "description": "支払いに使う通貨。paid_diamond=有償ダイヤのみ, diamond=ダイヤ(無償を先に消費し、不足分を有償から), coin=コイン, item=アイテム(チケット・トークン。currency_item_id で種類を指定), free=無料(値段は0)。",
+      "type": "string", "enum": ["paid_diamond", "diamond", "coin", "item", "free"], "x-dbType": "VARCHAR(16)"
+    },
+    "uniformNumber": {
+      "description": "背番号(1〜99)。",
+      "type": "integer", "minimum": 1, "maximum": 99, "x-dbType": "SMALLINT"
+    },
+
+    "players": {
+      "title": "プレイヤー情報マスタ",
+      "x-table": "players",
+      "x-primaryKey": ["player_id"],
+      "type": "object",
+      "properties": {
+        "player_id": { "$ref": "#/$defs/serialId", "description": "プレイヤーID" },
+        "player_name": { "type": "string", "minLength": 1, "maxLength": 32, "x-dbType": "VARCHAR(32)", "description": "プレイヤー名" },
+        "paid_diamonds": { "$ref": "#/$defs/amount", "description": "有償ダイヤ(課金)" },
+        "free_diamonds": { "$ref": "#/$defs/amount", "description": "無償ダイヤ(配布)" },
+        "coins": { "$ref": "#/$defs/amount", "description": "コイン" }
+      },
+      "required": ["player_id", "player_name", "paid_diamonds", "free_diamonds", "coins"],
+      "additionalProperties": false
+    },
+
+    "characters": {
+      "title": "選手情報マスタ",
+      "description": "各ステータスはLv1の値(min_*)と最大Lvの値(max_*)を持つ。min_* <= max_*。",
+      "x-table": "characters",
+      "x-primaryKey": ["character_id"],
+      "type": "object",
+      "properties": {
+        "character_id": { "$ref": "#/$defs/masterId", "description": "選手ID" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "選手名" },
+        "kana_name": { "type": "string", "minLength": 1, "maxLength": 128, "x-dbType": "VARCHAR(128)", "description": "かな名" },
+        "romaji_name": { "type": "string", "minLength": 1, "maxLength": 128, "x-dbType": "VARCHAR(128)", "description": "ローマ字名" },
+        "position": { "$ref": "#/$defs/position", "description": "適性ポジション" },
+        "rarity": { "type": "integer", "minimum": 1, "maximum": 5, "x-dbType": "SMALLINT", "description": "レア度(1〜5)" },
+        "height": { "type": "integer", "minimum": 100, "maximum": 250, "x-dbType": "SMALLINT", "description": "身長(cm)" },
+        "min_spike": { "$ref": "#/$defs/stat", "description": "Lv1のスパイク" },
+        "max_spike": { "$ref": "#/$defs/stat", "description": "最大Lvのスパイク" },
+        "min_receive": { "$ref": "#/$defs/stat", "description": "Lv1のレシーブ" },
+        "max_receive": { "$ref": "#/$defs/stat", "description": "最大Lvのレシーブ" },
+        "min_block": { "$ref": "#/$defs/stat", "description": "Lv1のブロック" },
+        "max_block": { "$ref": "#/$defs/stat", "description": "最大Lvのブロック" },
+        "min_toss": { "$ref": "#/$defs/stat", "description": "Lv1のトス" },
+        "max_toss": { "$ref": "#/$defs/stat", "description": "最大Lvのトス" },
+        "min_serve": { "$ref": "#/$defs/stat", "description": "Lv1のサーブ" },
+        "max_serve": { "$ref": "#/$defs/stat", "description": "最大Lvのサーブ" },
+        "min_power": { "$ref": "#/$defs/stat", "description": "Lv1のパワー" },
+        "max_power": { "$ref": "#/$defs/stat", "description": "最大Lvのパワー" },
+        "min_speed": { "$ref": "#/$defs/stat", "description": "Lv1のスピード" },
+        "max_speed": { "$ref": "#/$defs/stat", "description": "最大Lvのスピード" },
+        "min_stamina": { "$ref": "#/$defs/stat", "description": "Lv1のスタミナ" },
+        "max_stamina": { "$ref": "#/$defs/stat", "description": "最大Lvのスタミナ" },
+        "min_jump": { "$ref": "#/$defs/stat", "description": "Lv1のジャンプ" },
+        "max_jump": { "$ref": "#/$defs/stat", "description": "最大Lvのジャンプ" },
+        "min_technique": { "$ref": "#/$defs/stat", "description": "Lv1のテクニック" },
+        "max_technique": { "$ref": "#/$defs/stat", "description": "最大Lvのテクニック" }
+      },
+      "required": [
+        "character_id", "name", "kana_name", "romaji_name", "position", "rarity", "height",
+        "min_spike", "max_spike", "min_receive", "max_receive", "min_block", "max_block",
+        "min_toss", "max_toss", "min_serve", "max_serve", "min_power", "max_power",
+        "min_speed", "max_speed", "min_stamina", "max_stamina",
+        "min_jump", "max_jump", "min_technique", "max_technique"
+      ],
+      "additionalProperties": false
+    },
+
+    "items": {
+      "title": "アイテム情報マスタ",
+      "x-table": "items",
+      "x-primaryKey": ["item_id"],
+      "type": "object",
+      "properties": {
+        "item_id": { "$ref": "#/$defs/masterId", "description": "アイテムID" },
+        "item_type": { "$ref": "#/$defs/itemType", "description": "アイテム種別コード" },
+        "item_name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "アイテム名" }
+      },
+      "required": ["item_id", "item_type", "item_name"],
+      "additionalProperties": false
+    },
+
+    "shop_items": {
+      "title": "ショップ商品マスタ",
+      "description": "currency_type が item の時だけ currency_item_id を指定する(それ以外は null)。free の時は price が0。",
+      "x-table": "shop_items",
+      "x-primaryKey": ["shop_item_id"],
+      "x-foreignKeys": [
+        { "columns": ["item_id"], "references": "items(item_id)" },
+        { "columns": ["currency_item_id"], "references": "items(item_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "shop_item_id": { "$ref": "#/$defs/masterId", "description": "商品ID" },
+        "item_id": { "$ref": "#/$defs/masterId", "description": "購入対象のアイテムID [FK items]" },
+        "quantity": { "type": "integer", "minimum": 1, "default": 1, "x-dbType": "INTEGER", "description": "1回の購入で得る個数(仕様に追加)" },
+        "currency_type": { "$ref": "#/$defs/currencyType", "description": "購入通貨タイプ" },
+        "currency_item_id": {
+          "anyOf": [{ "$ref": "#/$defs/masterId" }, { "type": "null" }],
+          "description": "支払いに使うアイテムID(currency_type=item の時のみ) [FK items] (仕様に追加)"
+        },
+        "price": { "$ref": "#/$defs/amount", "description": "値段(必要な通貨の数量)" }
+      },
+      "required": ["shop_item_id", "item_id", "quantity", "currency_type", "currency_item_id", "price"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "currency_type": { "const": "item" } } },
+          "then": { "properties": { "currency_item_id": { "$ref": "#/$defs/masterId" } } },
+          "else": { "properties": { "currency_item_id": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "currency_type": { "const": "free" } } },
+          "then": { "properties": { "price": { "const": 0 } } }
+        }
+      ]
+    },
+
+    "player_items": {
+      "title": "プレイヤー所持アイテム",
+      "description": "プレイヤーとアイテムの組ごとに1行(所持数を持つ)。コイン・ダイヤは players の列で管理するため、item_type=coin のアイテムを得た時は players.coins に足し、この表には入れない。",
+      "x-table": "player_items",
+      "x-primaryKey": ["player_id", "item_id"],
+      "x-foreignKeys": [
+        { "columns": ["player_id"], "references": "players(player_id)", "onDelete": "CASCADE" },
+        { "columns": ["item_id"], "references": "items(item_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "player_id": { "$ref": "#/$defs/serialId", "description": "所有者のプレイヤーID [PK, FK players]" },
+        "item_id": { "$ref": "#/$defs/masterId", "description": "アイテムID [PK, FK items]" },
+        "quantity": { "$ref": "#/$defs/amount", "description": "所持数" }
+      },
+      "required": ["player_id", "item_id", "quantity"],
+      "additionalProperties": false
+    },
+
+    "player_characters": {
+      "title": "プレイヤー所持選手管理",
+      "description": "1レコード=所持している選手1体。同じ選手を重複して所持できる。各ステータスは現在値。",
+      "x-table": "player_characters",
+      "x-primaryKey": ["player_character_id"],
+      "x-foreignKeys": [
+        { "columns": ["player_id"], "references": "players(player_id)", "onDelete": "CASCADE" },
+        { "columns": ["character_id"], "references": "characters(character_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "player_character_id": { "$ref": "#/$defs/serialId", "description": "選手管理ID" },
+        "player_id": { "$ref": "#/$defs/serialId", "description": "所有者のプレイヤーID [FK players]" },
+        "character_id": { "$ref": "#/$defs/masterId", "description": "選手ID [FK characters]" },
+        "level": { "type": "integer", "minimum": 1, "maximum": 50, "x-dbType": "SMALLINT", "description": "現在のレベル(1〜50)" },
+        "exp": { "type": "integer", "minimum": 0, "default": 0, "x-dbType": "INTEGER", "description": "現在のレベル内の経験値(レベルアップで次のレベル分を引く。最大Lvでは0)" },
+        "spike": { "$ref": "#/$defs/stat", "description": "現在のスパイク" },
+        "receive": { "$ref": "#/$defs/stat", "description": "現在のレシーブ" },
+        "block": { "$ref": "#/$defs/stat", "description": "現在のブロック" },
+        "toss": { "$ref": "#/$defs/stat", "description": "現在のトス" },
+        "serve": { "$ref": "#/$defs/stat", "description": "現在のサーブ" },
+        "power": { "$ref": "#/$defs/stat", "description": "現在のパワー" },
+        "speed": { "$ref": "#/$defs/stat", "description": "現在のスピード" },
+        "stamina": { "$ref": "#/$defs/stat", "description": "現在のスタミナ" },
+        "jump": { "$ref": "#/$defs/stat", "description": "現在のジャンプ" },
+        "technique": { "$ref": "#/$defs/stat", "description": "現在のテクニック" }
+      },
+      "required": [
+        "player_character_id", "player_id", "character_id", "level", "exp",
+        "spike", "receive", "block", "toss", "serve", "power", "speed", "stamina", "jump", "technique"
+      ],
+      "additionalProperties": false
+    },
+
+    "party_decks": {
+      "title": "スタメン編成管理",
+      "x-table": "party_decks",
+      "x-primaryKey": ["deck_id"],
+      "x-unique": [["player_id", "deck_number"]],
+      "x-foreignKeys": [
+        { "columns": ["player_id"], "references": "players(player_id)", "onDelete": "CASCADE" }
+      ],
+      "type": "object",
+      "properties": {
+        "deck_id": { "$ref": "#/$defs/serialId", "description": "デッキID" },
+        "player_id": { "$ref": "#/$defs/serialId", "description": "所有者のプレイヤーID [FK players]" },
+        "deck_number": { "type": "integer", "minimum": 1, "maximum": 5, "x-dbType": "SMALLINT", "description": "プレイヤー内のデッキ番号(1〜5)" }
+      },
+      "required": ["deck_id", "player_id", "deck_number"],
+      "additionalProperties": false
+    },
+
+    "party_deck_members": {
+      "title": "スタメン配置詳細",
+      "description": "party_decks と1対1(deck_id がPK兼FK)。各枠は選手管理IDと背番号の組で、未配置なら両方 null、配置したら両方必須。配置する選手はデッキと同じプレイヤーの所持選手で、選手・背番号とも枠どうしで重複しないこと(アプリ側で検証)。デッキに置かれている所持選手は削除できない(先に枠から外す)。",
+      "x-table": "party_deck_members",
+      "x-primaryKey": ["deck_id"],
+      "x-foreignKeys": [
+        { "columns": ["deck_id"], "references": "party_decks(deck_id)", "onDelete": "CASCADE" },
+        { "columns": ["ws1_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["ws2_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["mb1_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["mb2_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["op_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["se_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" },
+        { "columns": ["li_player_character_id"], "references": "player_characters(player_character_id)", "onDelete": "NO ACTION" }
+      ],
+      "type": "object",
+      "properties": {
+        "deck_id": { "$ref": "#/$defs/serialId", "description": "デッキID [PK, FK party_decks]" },
+        "ws1_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "WS1の選手管理ID [FK player_characters]" },
+        "ws1_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "WS1の背番号" },
+        "ws2_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "WS2の選手管理ID [FK player_characters]" },
+        "ws2_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "WS2の背番号" },
+        "mb1_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "MB1の選手管理ID [FK player_characters]" },
+        "mb1_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "MB1の背番号" },
+        "mb2_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "MB2の選手管理ID [FK player_characters]" },
+        "mb2_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "MB2の背番号" },
+        "op_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "OPの選手管理ID [FK player_characters]" },
+        "op_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "OPの背番号" },
+        "se_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "Seの選手管理ID [FK player_characters]" },
+        "se_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "Seの背番号" },
+        "li_player_character_id": { "anyOf": [{ "$ref": "#/$defs/serialId" }, { "type": "null" }], "description": "Liの選手管理ID [FK player_characters]" },
+        "li_uniform_number": { "anyOf": [{ "$ref": "#/$defs/uniformNumber" }, { "type": "null" }], "description": "Liの背番号" },
+        "rotation_start_position": { "type": "integer", "minimum": 1, "maximum": 6, "x-dbType": "SMALLINT", "description": "セッターの初期位置(1〜6)" }
+      },
+      "required": [
+        "deck_id",
+        "ws1_player_character_id", "ws1_uniform_number",
+        "ws2_player_character_id", "ws2_uniform_number",
+        "mb1_player_character_id", "mb1_uniform_number",
+        "mb2_player_character_id", "mb2_uniform_number",
+        "op_player_character_id", "op_uniform_number",
+        "se_player_character_id", "se_uniform_number",
+        "li_player_character_id", "li_uniform_number",
+        "rotation_start_position"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "ws1_player_character_id": { "type": "null" } } }, "then": { "properties": { "ws1_uniform_number": { "type": "null" } } }, "else": { "properties": { "ws1_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "ws2_player_character_id": { "type": "null" } } }, "then": { "properties": { "ws2_uniform_number": { "type": "null" } } }, "else": { "properties": { "ws2_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "mb1_player_character_id": { "type": "null" } } }, "then": { "properties": { "mb1_uniform_number": { "type": "null" } } }, "else": { "properties": { "mb1_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "mb2_player_character_id": { "type": "null" } } }, "then": { "properties": { "mb2_uniform_number": { "type": "null" } } }, "else": { "properties": { "mb2_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "op_player_character_id": { "type": "null" } } }, "then": { "properties": { "op_uniform_number": { "type": "null" } } }, "else": { "properties": { "op_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "se_player_character_id": { "type": "null" } } }, "then": { "properties": { "se_uniform_number": { "type": "null" } } }, "else": { "properties": { "se_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } },
+        { "if": { "properties": { "li_player_character_id": { "type": "null" } } }, "then": { "properties": { "li_uniform_number": { "type": "null" } } }, "else": { "properties": { "li_uniform_number": { "$ref": "#/$defs/uniformNumber" } } } }
+      ]
+    },
+
+    "gachas": {
+      "title": "ガチャマスタ",
+      "description": "end_at が null なら常設。start_at < end_at。currency_type が item の時だけ currency_item_id(専用チケット)を指定する。free の時は値段が両方0、それ以外は1以上。",
+      "x-table": "gachas",
+      "x-primaryKey": ["gacha_id"],
+      "x-foreignKeys": [
+        { "columns": ["currency_item_id"], "references": "items(item_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "gacha_id": { "$ref": "#/$defs/masterId", "description": "ガチャID" },
+        "gacha_name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "ガチャ名" },
+        "start_at": { "$ref": "#/$defs/datetime", "description": "開始日時" },
+        "end_at": { "anyOf": [{ "$ref": "#/$defs/datetime" }, { "type": "null" }], "description": "終了日時(null=常設)" },
+        "currency_type": { "$ref": "#/$defs/currencyType", "description": "消費通貨タイプ" },
+        "currency_item_id": {
+          "anyOf": [{ "$ref": "#/$defs/masterId" }, { "type": "null" }],
+          "description": "専用チケットのアイテムID(currency_type=item の時のみ) [FK items] (仕様に追加)"
+        },
+        "single_price": { "type": "integer", "minimum": 0, "x-dbType": "INTEGER", "description": "単発の消費量(free の時だけ0、それ以外は1以上)" },
+        "multi_price": { "type": "integer", "minimum": 0, "x-dbType": "INTEGER", "description": "10連の消費量(free の時だけ0、それ以外は1以上)" }
+      },
+      "required": ["gacha_id", "gacha_name", "start_at", "end_at", "currency_type", "currency_item_id", "single_price", "multi_price"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "currency_type": { "const": "item" } } },
+          "then": { "properties": { "currency_item_id": { "$ref": "#/$defs/masterId" } } },
+          "else": { "properties": { "currency_item_id": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "currency_type": { "const": "free" } } },
+          "then": { "properties": { "single_price": { "const": 0 }, "multi_price": { "const": 0 } } },
+          "else": { "properties": { "single_price": { "minimum": 1 }, "multi_price": { "minimum": 1 } } }
+        }
+      ]
+    },
+
+    "gacha_details": {
+      "title": "ガチャ排出率詳細",
+      "description": "1ガチャ内で同じ選手は1行まで。1ガチャの probability の合計は100(アプリ側で検証)。",
+      "x-table": "gacha_details",
+      "x-primaryKey": ["gacha_detail_id"],
+      "x-unique": [["gacha_id", "character_id"]],
+      "x-foreignKeys": [
+        { "columns": ["gacha_id"], "references": "gachas(gacha_id)", "onDelete": "CASCADE" },
+        { "columns": ["character_id"], "references": "characters(character_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "gacha_detail_id": { "$ref": "#/$defs/serialId", "description": "ガチャ詳細ID" },
+        "gacha_id": { "$ref": "#/$defs/masterId", "description": "ガチャID [FK gachas]" },
+        "character_id": { "$ref": "#/$defs/masterId", "description": "排出される選手ID [FK characters]" },
+        "probability": {
+          "type": "number", "exclusiveMinimum": 0, "maximum": 100, "x-dbType": "DECIMAL(7,4)",
+          "description": "排出確率(%)。小数点以下4桁まで。例: 0.75 = 0.75%"
+        }
+      },
+      "required": ["gacha_detail_id", "gacha_id", "character_id", "probability"],
+      "additionalProperties": false
+    }
+  }
+}

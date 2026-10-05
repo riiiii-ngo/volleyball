@@ -1,0 +1,183 @@
+/* フリー練習(コート)画面：3D描画の土台、ジョイスティック、サーブ/レシーブ/戻るボタン */
+.court-screen { background: #05070a; }
+.court-view { position: absolute; inset: 0; }
+.court-view canvas { display: block; }
+.court-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-en);
+  font-size: 24px;
+  letter-spacing: 0.3em;
+  color: var(--navy-300);
+}
+
+.vb-joystick-base {
+  position: fixed;
+  left: 50%;
+  bottom: max(28px, env(safe-area-inset-bottom, 28px));
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overflow: hidden;
+  z-index: 10;
+}
+.vb-joystick-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 33.34%;
+  background: transparent;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  transition: background 0.15s ease;
+  pointer-events: none;
+}
+.vb-joystick-zone-left { border-left: none; }
+.vb-joystick-zone-active {
+  background: rgba(255, 106, 0, 0.30);
+}
+.vb-joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  transform: translate(-50%, -50%);
+}
+
+.vb-serve-btn {
+  position: fixed;
+  right: 26px;
+  bottom: max(48px, env(safe-area-inset-bottom, 48px));
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff8a3d, #e0272e 70%);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 16px;
+  font-weight: bold;
+  font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+  letter-spacing: 2px;
+  padding: 0;
+  white-space: nowrap;
+  touch-action: manipulation;
+  z-index: 10;
+}
+.vb-serve-btn:active {
+  filter: brightness(0.85);
+}
+.vb-serve-btn:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+}
+
+.vb-receive-btn {
+  position: fixed;
+  right: 26px;
+  bottom: max(148px, calc(env(safe-area-inset-bottom, 0px) + 148px));
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #5fb8ff, #1a6fd1 70%);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 15px;
+  font-weight: bold;
+  font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+  letter-spacing: 2px;
+  padding: 0;
+  white-space: nowrap;
+  touch-action: manipulation;
+  z-index: 10;
+}
+.vb-receive-btn:active {
+  filter: brightness(0.85);
+}
+.vb-receive-btn:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+}
+
+.vb-back-btn {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left, 12px));
+  top: max(12px, env(safe-area-inset-top, 12px));
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(10, 13, 18, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* スコア(上部中央) */
+.court-score {
+  position: fixed;
+  left: 50%;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  background: rgba(7, 13, 36, 0.82);
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  color: #fff;
+  z-index: 10;
+  pointer-events: none;
+}
+.court-score[hidden] { display: none; }
+.court-score-team {
+  max-width: 5.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--navy-300);
+}
+.court-score-num {
+  min-width: 1.2em;
+  text-align: center;
+  font-family: var(--font-en);
+  font-size: 30px;
+  line-height: 1.1;
+}
+.court-score-sep { font-family: var(--font-en); font-size: 20px; color: var(--navy-300); }
+/* 直前に点を取った側をオレンジに */
+.court-score.is-near-point .court-score-num.is-near,
+.court-score.is-far-point .court-score-num.is-far { color: var(--orange); }
+.court-score-reason {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  font-family: var(--font-en);
+  font-size: 18px;
+  letter-spacing: 0.2em;
+  color: var(--yellow);
+}
+/* スコアの下に「‹ メニュー」が重ならない幅を確保できない狭い画面ではチーム名を隠す */
+@media (max-width: 420px) {
+  .court-score-team { display: none; }
+}
+
+/* コート画面ではトーストを上に出す(下はジョイスティックとボタンがあるため) */
+body:has(.court-screen) .toast {
+  top: calc(max(12px, env(safe-area-inset-top, 12px)) + 64px);
+  bottom: auto;
+}

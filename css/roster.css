@@ -1,0 +1,200 @@
+/* 選手一覧・選手育成画面の共通部分(ヘッダー・背景はメニュー画面の .menu-screen / .menu-header を流用) */
+.roster-back {
+  display: block;
+  margin: 0 auto 10px;
+  max-width: var(--content-max, 560px);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--navy-300);
+  cursor: pointer;
+}
+.roster-back:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+
+.roster-content { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+
+.roster-status {
+  max-width: var(--content-max, 560px);
+  margin: 40px auto;
+  text-align: center;
+  font-family: var(--font-en);
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  color: var(--navy-300);
+}
+.roster-status.is-error {
+  font-family: var(--font-label);
+  font-size: 14px;
+  letter-spacing: 0;
+  line-height: 1.7;
+  color: #ffb4a8;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.roster-team {
+  max-width: var(--content-max, 560px);
+  margin: 0 auto 12px;
+  font-weight: 900;
+  font-size: 15px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.roster-team span { font-size: 12px; color: var(--navy-300); }
+
+.roster-list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: var(--content-max, 560px);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.roster-card {
+  background: var(--navy-850);
+  border-top: 3px solid var(--orange);
+  /* 右上を斜めに落としてメニューのパネルと揃える */
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%);
+  padding: 12px 16px 14px;
+  animation: item-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.roster-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.roster-number {
+  flex: none;
+  width: 1.6em;
+  font-family: var(--font-en);
+  font-size: 44px;
+  line-height: 1;
+  color: var(--orange);
+  text-align: center;
+}
+.roster-name-block { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.roster-kana { font-size: 10px; font-weight: 700; color: var(--navy-300); letter-spacing: 0.1em; }
+.roster-name { font-size: 20px; font-weight: 900; letter-spacing: 0.06em; }
+.roster-profile { font-size: 11px; font-weight: 700; color: var(--navy-300); }
+.roster-pos {
+  flex: none;
+  min-width: 2.4em;
+  padding: 4px 10px 2px;
+  font-family: var(--font-en);
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--ink);
+  background: var(--cream);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+
+.roster-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 18px;
+}
+.roster-stat {
+  display: grid;
+  grid-template-columns: 5.4em 1fr 2em;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--navy-300);
+}
+.roster-stat-bar {
+  height: 6px;
+  background: var(--navy-700);
+  transform: skewX(-20deg);
+  overflow: hidden;
+}
+.roster-stat-bar span { display: block; height: 100%; background: var(--navy-300); }
+.roster-stat-value {
+  font-family: var(--font-en);
+  font-size: 17px;
+  line-height: 1;
+  text-align: right;
+  color: #fff;
+}
+/* 育成で上げた分 */
+.roster-stat-value { position: relative; }
+.roster-stat-bonus {
+  position: absolute;
+  left: 100%;
+  top: -6px;
+  margin-left: 1px;
+  font-size: 10px;
+  color: var(--yellow);
+}
+/* 75以上の得意ステータスはオレンジで強調 */
+.roster-stat.is-high .roster-stat-bar span { background: var(--orange); }
+.roster-stat.is-high .roster-stat-value { color: var(--orange); }
+
+@media (orientation: landscape) {
+  .roster-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 360px) {
+  .roster-stats { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .roster-card { animation: none; }
+}
+
+/* レベル・経験値・育成ポイント(VolleyballUI.levelHtml / pointsHtml) */
+.roster-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.ui-level {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ui-level-lv {
+  flex: none;
+  font-family: var(--font-en);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: var(--navy-300);
+}
+.ui-level-lv b { font-weight: normal; font-size: 22px; color: #fff; }
+.ui-level-bar {
+  flex: 1;
+  height: 5px;
+  background: var(--navy-700);
+  overflow: hidden;
+}
+.ui-level-bar span { display: block; height: 100%; background: var(--yellow); }
+.ui-level-exp {
+  flex: none;
+  font-family: var(--font-en);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--navy-300);
+}
+.ui-points {
+  flex: none;
+  font-family: var(--font-en);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--navy-500);
+}
+.ui-points small { font-size: 12px; margin-left: 2px; }
+.ui-points.has-points { color: var(--yellow); }

@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "player_characters": [
+    {"player_character_id": 1, "player_id": 1, "character_id": "c001", "level": 1, "exp": 0, "spike": 51, "receive": 55, "block": 40, "toss": 82, "serve": 60, "power": 40, "speed": 62, "stamina": 63, "jump": 50, "technique": 62},
+    {"player_character_id": 2, "player_id": 1, "character_id": "c002", "level": 1, "exp": 0, "spike": 73, "receive": 55, "block": 50, "toss": 35, "serve": 62, "power": 75, "speed": 60, "stamina": 67, "jump": 72, "technique": 72},
+    {"player_character_id": 3, "player_id": 1, "character_id": "c003", "level": 1, "exp": 0, "spike": 67, "receive": 38, "block": 80, "toss": 30, "serve": 50, "power": 68, "speed": 48, "stamina": 63, "jump": 78, "technique": 55},
+    {"player_character_id": 4, "player_id": 1, "character_id": "c004", "level": 1, "exp": 0, "spike": 71, "receive": 45, "block": 60, "toss": 30, "serve": 70, "power": 80, "speed": 55, "stamina": 65, "jump": 68, "technique": 66},
+    {"player_character_id": 5, "player_id": 1, "character_id": "c005", "level": 1, "exp": 0, "spike": 35, "receive": 85, "block": 20, "toss": 55, "serve": 30, "power": 25, "speed": 75, "stamina": 70, "jump": 40, "technique": 40},
+    {"player_character_id": 6, "player_id": 1, "character_id": "c006", "level": 1, "exp": 0, "spike": 62, "receive": 68, "block": 45, "toss": 40, "serve": 58, "power": 62, "speed": 62, "stamina": 64, "jump": 60, "technique": 64},
+    {"player_character_id": 7, "player_id": 1, "character_id": "c214", "level": 1, "exp": 0, "spike": 69, "receive": 39, "block": 75, "toss": 33, "serve": 54, "power": 68, "speed": 53, "stamina": 63, "jump": 79, "technique": 60},
+    {"player_character_id": 8, "player_id": 1, "character_id": "c201", "level": 1, "exp": 0, "spike": 84, "receive": 72, "block": 54, "toss": 51, "serve": 75, "power": 80, "speed": 71, "stamina": 73, "jump": 77, "technique": 79},
+    {"player_character_id": 9, "player_id": 1, "character_id": "c213", "level": 12, "exp": 0, "spike": 70, "receive": 70, "block": 58, "toss": 38, "serve": 70, "power": 75, "speed": 59, "stamina": 71, "jump": 69, "technique": 71},
+    {"player_character_id": 10, "player_id": 1, "character_id": "c217", "level": 5, "exp": 0, "spike": 30, "receive": 79, "block": 15, "toss": 52, "serve": 24, "power": 25, "speed": 72, "stamina": 72, "jump": 36, "technique": 40},
+    {"player_character_id": 11, "player_id": 1, "character_id": "c230", "level": 20, "exp": 0, "spike": 42, "receive": 55, "block": 50, "toss": 79, "serve": 62, "power": 35, "speed": 67, "stamina": 57, "jump": 53, "technique": 68},
+    {"player_character_id": 12, "player_id": 1, "character_id": "c002", "level": 1, "exp": 0, "spike": 73, "receive": 55, "block": 50, "toss": 35, "serve": 62, "power": 75, "speed": 60, "stamina": 67, "jump": 72, "technique": 72},
+    {"player_character_id": 13, "player_id": 2, "character_id": "c101", "level": 1, "exp": 0, "spike": 71, "receive": 50, "block": 55, "toss": 35, "serve": 60, "power": 74, "speed": 58, "stamina": 63, "jump": 70, "technique": 70},
+    {"player_character_id": 14, "player_id": 2, "character_id": "c102", "level": 1, "exp": 0, "spike": 50, "receive": 55, "block": 48, "toss": 78, "serve": 55, "power": 38, "speed": 60, "stamina": 68, "jump": 52, "technique": 60},
+    {"player_character_id": 15, "player_id": 2, "character_id": "c103", "level": 1, "exp": 0, "spike": 65, "receive": 36, "block": 78, "toss": 28, "serve": 48, "power": 66, "speed": 45, "stamina": 55, "jump": 76, "technique": 52},
+    {"player_character_id": 16, "player_id": 2, "character_id": "c104", "level": 1, "exp": 0, "spike": 63, "receive": 60, "block": 46, "toss": 38, "serve": 60, "power": 64, "speed": 60, "stamina": 57, "jump": 62, "technique": 63},
+    {"player_character_id": 17, "player_id": 2, "character_id": "c105", "level": 1, "exp": 0, "spike": 32, "receive": 82, "block": 18, "toss": 52, "serve": 28, "power": 22, "speed": 72, "stamina": 68, "jump": 38, "technique": 38},
+    {"player_character_id": 18, "player_id": 2, "character_id": "c106", "level": 1, "exp": 0, "spike": 70, "receive": 46, "block": 58, "toss": 30, "serve": 66, "power": 76, "speed": 54, "stamina": 55, "jump": 66, "technique": 68},
+    {"player_character_id": 19, "player_id": 2, "character_id": "c226", "level": 1, "exp": 0, "spike": 62, "receive": 37, "block": 80, "toss": 25, "serve": 46, "power": 57, "speed": 41, "stamina": 50, "jump": 66, "technique": 50}
+  ]
+}

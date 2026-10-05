@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "players": [
+    {"player_id": 1, "player_name": "プレイヤー", "paid_diamonds": 0, "free_diamonds": 1500, "coins": 12000},
+    {"player_id": 2, "player_name": "紅陵高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0}
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "teams": [
+    {
+      "id": "player",
+      "name": "マイチーム",
+      "members": [
+        { "slot": "front-1", "characterId": "c002" },
+        { "slot": "front-2", "characterId": "c003" },
+        { "slot": "front-3", "characterId": "c004" },
+        { "slot": "back-1", "characterId": "c005" },
+        { "slot": "back-2", "characterId": "c006" },
+        { "slot": "server", "characterId": "c001" }
+      ]
+    },
+    {
+      "id": "cpu",
+      "name": "紅陵高校",
+      "members": [
+        { "slot": "front-1", "characterId": "c101" },
+        { "slot": "front-2", "characterId": "c102" },
+        { "slot": "front-3", "characterId": "c103" },
+        { "slot": "back-1", "characterId": "c104" },
+        { "slot": "back-2", "characterId": "c105" },
+        { "slot": "back-3", "characterId": "c106" }
+      ]
+    }
+  ]
+}

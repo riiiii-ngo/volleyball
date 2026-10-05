@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "player_items": [
+    {"player_id": 1, "item_id": "i_scout_ticket", "quantity": 3},
+    {"player_id": 1, "item_id": "i_practice_token", "quantity": 120}
+  ]
+}

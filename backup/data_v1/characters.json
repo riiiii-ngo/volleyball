@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "characters": [
+    {
+      "id": "c001", "name": "朝倉 湊", "kana": "あさくら みなと",
+      "level": 1, "position": "S", "number": 1, "height": 178,
+      "stats": { "speed": 62, "jump": 50, "power": 40, "receive": 55, "block": 40, "toss": 82, "serve": 60, "technique": 62 }
+    },
+    {
+      "id": "c002", "name": "桐生 颯太", "kana": "きりゅう そうた",
+      "level": 1, "position": "OH", "number": 4, "height": 183,
+      "stats": { "speed": 60, "jump": 72, "power": 75, "receive": 55, "block": 50, "toss": 35, "serve": 62, "technique": 72 }
+    },
+    {
+      "id": "c003", "name": "大鷹 蓮", "kana": "おおたか れん",
+      "level": 1, "position": "MB", "number": 7, "height": 192,
+      "stats": { "speed": 48, "jump": 78, "power": 68, "receive": 38, "block": 80, "toss": 30, "serve": 50, "technique": 55 }
+    },
+    {
+      "id": "c004", "name": "久遠 隼人", "kana": "くおん はやと",
+      "level": 1, "position": "OP", "number": 11, "height": 187,
+      "stats": { "speed": 55, "jump": 68, "power": 80, "receive": 45, "block": 60, "toss": 30, "serve": 70, "technique": 66 }
+    },
+    {
+      "id": "c005", "name": "小町 陽向", "kana": "こまち ひなた",
+      "level": 1, "position": "L", "number": 2, "height": 168,
+      "stats": { "speed": 75, "jump": 40, "power": 25, "receive": 85, "block": 20, "toss": 55, "serve": 30, "technique": 40 }
+    },
+    {
+      "id": "c006", "name": "真壁 悠", "kana": "まかべ ゆう",
+      "level": 1, "position": "OH", "number": 5, "height": 181,
+      "stats": { "speed": 62, "jump": 60, "power": 62, "receive": 68, "block": 45, "toss": 40, "serve": 58, "technique": 64 }
+    },
+    {
+      "id": "c101", "name": "赤城 剛", "kana": "あかぎ ごう",
+      "level": 1, "position": "OH", "number": 4, "height": 185,
+      "stats": { "speed": 58, "jump": 70, "power": 74, "receive": 50, "block": 55, "toss": 35, "serve": 60, "technique": 70 }
+    },
+    {
+      "id": "c102", "name": "早瀬 透", "kana": "はやせ とおる",
+      "level": 1, "position": "S", "number": 1, "height": 176,
+      "stats": { "speed": 60, "jump": 52, "power": 38, "receive": 55, "block": 48, "toss": 78, "serve": 55, "technique": 60 }
+    },
+    {
+      "id": "c103", "name": "岩切 大地", "kana": "いわきり だいち",
+      "level": 1, "position": "MB", "number": 8, "height": 194,
+      "stats": { "speed": 45, "jump": 76, "power": 66, "receive": 36, "block": 78, "toss": 28, "serve": 48, "technique": 52 }
+    },
+    {
+      "id": "c104", "name": "神崎 翔", "kana": "かんざき しょう",
+      "level": 1, "position": "OH", "number": 6, "height": 182,
+      "stats": { "speed": 60, "jump": 62, "power": 64, "receive": 60, "block": 46, "toss": 38, "serve": 60, "technique": 63 }
+    },
+    {
+      "id": "c105", "name": "柚木 奏", "kana": "ゆずき かなで",
+      "level": 1, "position": "L", "number": 2, "height": 170,
+      "stats": { "speed": 72, "jump": 38, "power": 22, "receive": 82, "block": 18, "toss": 52, "serve": 28, "technique": 38 }
+    },
+    {
+      "id": "c106", "name": "鳴海 迅", "kana": "なるみ じん",
+      "level": 1, "position": "OP", "number": 10, "height": 188,
+      "stats": { "speed": 54, "jump": 66, "power": 76, "receive": 46, "block": 58, "toss": 30, "serve": 66, "technique": 68 }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "gachas": [
+    {"gacha_id": "g_standard", "gacha_name": "常設スカウト", "start_at": "2026-10-01T00:00:00+09:00", "end_at": null, "currency_type": "diamond", "currency_item_id": null, "single_price": 150, "multi_price": 1500},
+    {"gacha_id": "g_pickup_hoshino", "gacha_name": "ピックアップスカウト 星野 光", "start_at": "2026-10-05T15:00:00+09:00", "end_at": "2026-10-19T14:59:59+09:00", "currency_type": "diamond", "currency_item_id": null, "single_price": 150, "multi_price": 1500},
+    {"gacha_id": "g_ticket", "gacha_name": "チケットスカウト", "start_at": "2026-10-01T00:00:00+09:00", "end_at": null, "currency_type": "item", "currency_item_id": "i_scout_ticket", "single_price": 1, "multi_price": 10},
+    {"gacha_id": "g_premium", "gacha_name": "★4以上確定スカウト", "start_at": "2026-10-01T00:00:00+09:00", "end_at": null, "currency_type": "item", "currency_item_id": "i_premium_ticket", "single_price": 1, "multi_price": 10},
+    {"gacha_id": "g_trial", "gacha_name": "お試しガチャ", "start_at": "2026-10-05T00:00:00+09:00", "end_at": "9999-12-31T23:59:59+09:00", "currency_type": "free", "currency_item_id": null, "single_price": 0, "multi_price": 0}
+  ]
+}

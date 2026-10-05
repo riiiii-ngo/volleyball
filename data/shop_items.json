@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "shop_items": [
+    {"shop_item_id": "s_coin_1000", "item_id": "i_coin", "quantity": 1000, "currency_type": "diamond", "currency_item_id": null, "price": 50},
+    {"shop_item_id": "s_coin_12000", "item_id": "i_coin", "quantity": 12000, "currency_type": "diamond", "currency_item_id": null, "price": 500},
+    {"shop_item_id": "s_scout_ticket_coin", "item_id": "i_scout_ticket", "quantity": 1, "currency_type": "coin", "currency_item_id": null, "price": 3000},
+    {"shop_item_id": "s_scout_ticket_token", "item_id": "i_scout_ticket", "quantity": 1, "currency_type": "item", "currency_item_id": "i_practice_token", "price": 50},
+    {"shop_item_id": "s_premium_ticket", "item_id": "i_premium_ticket", "quantity": 1, "currency_type": "paid_diamond", "currency_item_id": null, "price": 300}
+  ]
+}

@@ -1,0 +1,90 @@
+/* 全画面共通：色・フォントのトークン、リセット、画面の土台、トースト、エラー表示 */
+:root {
+  --navy-950: #070d24;
+  --navy-900: #0a1330;
+  --navy-850: #0e1a40;
+  --navy-700: #1a2a5c;
+  --navy-500: #5d6d9e;
+  --navy-300: #8e9cc8;
+  --cream: #f3ede1;
+  --ink: #0e1633;
+  --orange: #ff6b1a;
+  --yellow: #ffd23f;
+  --tabbar-h: 66px;
+  --slant: 16px;
+  --font-ja: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", sans-serif; /* 見出し専用(小さいと潰れる) */
+  --font-label: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-en: "Bebas Neue", Impact, "Arial Narrow", sans-serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--navy-900);
+  color: #fff;
+  font-family: var(--font-label);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+button, a { font: inherit; color: inherit; }
+
+.screen {
+  position: fixed;
+  inset: 0;
+  animation: screen-in 0.25s ease both;
+}
+@keyframes screen-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- トースト ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 18px);
+  transform: translate(-50%, 12px);
+  max-width: calc(100% - 32px);
+  padding: 11px 26px;
+  background: var(--yellow);
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 14px;
+  white-space: nowrap;
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 20;
+}
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+
+/* デバッグ用：JSエラーを画面上部に赤帯で表示する(スマホでDevToolsが開けなくても確認できるように) */
+.error-banner {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: max(8px, env(safe-area-inset-top, 8px));
+  max-height: 40vh;
+  overflow-y: auto;
+  background: rgba(180, 0, 0, 0.92);
+  color: #fff;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px 10px;
+  border-radius: 6px;
+  z-index: 9999;
+  display: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen { animation: none; }
+  .toast { transition: none; }
+}
