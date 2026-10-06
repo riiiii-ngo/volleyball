@@ -6,7 +6,7 @@
  * データは2種類:
  *   - マスタ(初期値): キャラクターの基本ステータスとチーム編成。ゲーム側からは書き換えない。
  *   - セーブ(進行状況): キャラクターごとのレベル・経験値・育成ポイント・割り振ったステータスと、
- *     ガチャで獲得した所持選手(player_characters テーブルと同じ形の行)。
+ *     ガチャで獲得した所持選手(player_characters テーブルと同じ形の行)、ショップで買った・使ったアイテムの所持数。
  *   画面に渡すキャラクターは、マスタの基本ステータスにセーブの割り振り分を足したもの。
  *
  * 保存先の切り替え:
@@ -24,8 +24,12 @@
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
  *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行> }  初期の所持選手
+ *   loadItems()             → { items: Array<{ id, type, name, effectValue|null }>,
+ *                               shopItems: Array<{ id, itemId, quantity, currencyType, currencyItemId|null, price }>,
+ *                               owned: Array<{ itemId, quantity }> }   owned は初期の所持アイテム
  *   loadProgress()          → { characters: { [id]: { level, exp, points, bonus: { [stat]: n } } },
- *                               ownedCharacters?: Array<player_characters の行> } | null
+ *                               ownedCharacters?: Array<player_characters の行>,
+ *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ
  *   saveProgress(progress)  → 保存完了で resolve
  *   保存先の形(data/*.json や DB のテーブル)からこの形への変換はソースが行う(例: js/data/json-source.js)。
  *   欠けた値や範囲外の値はここで補正するので、ソース側は保存されている値をそのまま返せばよい。
@@ -71,6 +75,14 @@
     item: 'アイテム'
   });
   const GACHA_COUNTS = Object.freeze([1, 10]); // 単発 / 10連
+
+  // アイテム種別(schema の item_type)の表示名
+  const ITEM_TYPE_LABELS = Object.freeze({
+    coin: 'コイン',
+    token: 'トークン',
+    gacha_ticket: 'ガチャチケット',
+    exp_ticket: '経験値チケット'
+  });
 
   const POSITIONS = Object.freeze({
     WS: 'ウイングスパイカー',
@@ -169,7 +181,7 @@
   }
 
   // セーブデータの読み込み時補正(壊れた値・マスタに無いキャラは無視する)。
-  function normalizeProgress(raw, master) {
+  function normalizeProgress(raw, master, itemMaster) {
     const out = { characters: {} };
     const chars = (raw && raw.characters) || {};
     Object.keys(chars).forEach(id => {
@@ -191,6 +203,12 @@
     out.ownedCharacters = ((raw && raw.ownedCharacters) || [])
       .map(row => normalizeOwnedRow(row, master))
       .filter(Boolean);
+    // ショップで買った・使ったアイテムの所持数(アイテムマスタに無いものは捨てる)
+    out.items = {};
+    const items = (raw && raw.items) || {};
+    Object.keys(items).forEach(id => {
+      if (itemMaster.has(id)) out.items[id] = Math.max(0, Math.round(Number(items[id]) || 0));
+    });
     return out;
   }
 
@@ -238,13 +256,48 @@
     };
   }
 
+  // アイテムマスタ・ショップ商品・初期の所持アイテムの補正。
+  function normalizeItems(raw) {
+    const master = new Map();
+    (raw.items || []).forEach(i => {
+      if (!i || !i.id) throw new Error('id の無いアイテムがあります');
+      const effect = Math.round(Number(i.effectValue));
+      master.set(String(i.id), Object.freeze({
+        id: String(i.id),
+        type: i.type,
+        name: i.name || i.id,
+        effectValue: effect >= 1 ? effect : null
+      }));
+    });
+    master.forEach(i => {
+      if (i.type === 'exp_ticket' && i.effectValue == null) throw new Error('経験値チケット "' + i.id + '" に効果量がありません');
+    });
+    const shopItems = (raw.shopItems || []).map(s => {
+      if (!master.has(String(s.itemId))) throw new Error('ショップ商品 "' + s.id + '" に存在しないアイテム "' + s.itemId + '" が指定されています');
+      return Object.freeze({
+        id: String(s.id),
+        itemId: String(s.itemId),
+        quantity: Math.max(1, Math.round(Number(s.quantity) || 1)),
+        currencyType: s.currencyType,
+        currencyItemId: s.currencyItemId == null ? null : String(s.currencyItemId),
+        price: Math.max(0, Math.round(Number(s.price) || 0))
+      });
+    });
+    const owned = {};
+    (raw.owned || []).forEach(r => {
+      if (master.has(String(r.itemId))) owned[String(r.itemId)] = Math.max(0, Math.round(Number(r.quantity) || 0));
+    });
+    return { master: master, shopItems: shopItems, owned: owned };
+  }
+
   function load() {
     if (!source) throw new Error('VolleyballData.configure() が呼ばれていません');
     if (!cache) {
       cache = Promise.all([
-        source.loadCharacters(), source.loadTeams(), source.loadProgress(), source.loadGachas(), source.loadOwnedCharacters()
+        source.loadCharacters(), source.loadTeams(), source.loadProgress(), source.loadGachas(), source.loadOwnedCharacters(),
+        source.loadItems()
       ])
-        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned]) => {
+        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned, rawItems]) => {
           const master = new Map();
           rawChars.forEach(raw => {
             const c = normalizeMaster(raw);
@@ -257,10 +310,15 @@
               throw new Error('チーム "' + t.id + '" の ' + m.slot + ' に存在しないキャラクター "' + m.characterId + '" が指定されています');
             }
           }));
+          const items = normalizeItems(rawItems);
           return {
             master: master,
             teams: rawTeams,
-            progress: normalizeProgress(rawProgress, master),
+            progress: normalizeProgress(rawProgress, master, items.master),
+            itemMaster: items.master,
+            shopItems: items.shopItems,
+            // 初期の所持アイテム { [itemId]: 所持数 }(マスタ側。変わった分は progress.items)
+            initialItems: items.owned,
             gachas: rawGachas.map(g => normalizeGacha(g, master)),
             playerId: rawOwned.playerId,
             // 初期の所持選手(マスタ側。ゲームからは書き換えない)。獲得分は progress.ownedCharacters
@@ -310,21 +368,26 @@
    */
   function addExp(ids, amount) {
     return load().then(d => {
-      const results = ids.filter(id => d.master.has(String(id))).map(id => {
-        id = String(id);
-        const p = progressOf(d, id);
-        const r = VolleyballProgression.addExp(p, amount);
-        p.level = r.level;
-        p.exp = r.exp;
-        p.points = r.points;
-        return { id: id, levelsGained: r.levelsGained, pointsGained: r.pointsGained };
-      });
-      return save(d).then(() => results.map(r => ({
-        character: buildCharacter(d, r.id),
-        levelsGained: r.levelsGained,
-        pointsGained: r.pointsGained
-      })));
+      const results = grantExp(d, ids, amount);
+      return save(d).then(() => results.map(r => expResult(d, r)));
     });
+  }
+
+  // セーブ上の経験値を増やす(保存はしない)。
+  function grantExp(d, ids, amount) {
+    return ids.filter(id => d.master.has(String(id))).map(id => {
+      id = String(id);
+      const p = progressOf(d, id);
+      const r = VolleyballProgression.addExp(p, amount);
+      p.level = r.level;
+      p.exp = r.exp;
+      p.points = r.points;
+      return { id: id, levelsGained: r.levelsGained, pointsGained: r.pointsGained };
+    });
+  }
+
+  function expResult(d, r) {
+    return { character: buildCharacter(d, r.id), levelsGained: r.levelsGained, pointsGained: r.pointsGained };
   }
 
   /**
@@ -482,6 +545,100 @@
     });
   }
 
+  // ---------- アイテム・ショップ ----------
+
+  function itemCount(d, itemId) {
+    return d.progress.items[itemId] != null ? d.progress.items[itemId] : (d.initialItems[itemId] || 0);
+  }
+
+  // 画面に渡すアイテム(マスタ + 所持数)。
+  function buildItem(d, item) {
+    return Object.freeze({
+      id: item.id,
+      type: item.type,
+      typeLabel: ITEM_TYPE_LABELS[item.type] || item.type,
+      name: item.name,
+      effectValue: item.effectValue,
+      count: itemCount(d, item.id)
+    });
+  }
+
+  function currencyLabel(d, type, itemId) {
+    if (type === 'item') {
+      const item = d.itemMaster.get(itemId);
+      return item ? item.name : CURRENCY_LABELS.item;
+    }
+    return CURRENCY_LABELS[type] || type;
+  }
+
+  /**
+   * 所持しているアイテム(所持数1以上。コインは players の列で持つので含めない)。アイテムマスタの順。
+   * @param {string} [type] - 指定すればその種別だけ(例 'exp_ticket')
+   */
+  function getItems(type) {
+    return load().then(d => Array.from(d.itemMaster.values())
+      .filter(i => i.type !== 'coin' && (!type || i.type === type))
+      .map(i => buildItem(d, i))
+      .filter(i => i.count > 0));
+  }
+
+  /** ショップの商品一覧(ショップ商品マスタの順)。今は無料(currency_type = free)の商品だけ買える。 */
+  function getShopItems() {
+    return load().then(d => d.shopItems.map(s => Object.freeze({
+      id: s.id,
+      item: buildItem(d, d.itemMaster.get(s.itemId)),
+      quantity: s.quantity,
+      currencyType: s.currencyType,
+      currencyLabel: currencyLabel(d, s.currencyType, s.currencyItemId),
+      price: s.price,
+      isFree: s.currencyType === 'free',
+      canBuy: s.currencyType === 'free' && d.itemMaster.get(s.itemId).type !== 'coin'
+    })));
+  }
+
+  /**
+   * ショップの商品を1回買う。今は無料の商品だけ。
+   * DB に移した時は、不正防止のため購入処理をサーバー側で行うこと。
+   * @returns {Promise<item>} 購入後のアイテム(所持数を含む)
+   */
+  function buyShopItem(shopItemId) {
+    return load().then(d => {
+      const s = d.shopItems.find(x => x.id === String(shopItemId));
+      if (!s) throw new Error('商品が見つかりません');
+      if (s.currencyType !== 'free') throw new Error('有料の商品はまだ買えません');
+      const item = d.itemMaster.get(s.itemId);
+      if (item.type === 'coin') throw new Error('コインはまだ買えません');
+      d.progress.items[item.id] = itemCount(d, item.id) + s.quantity;
+      return save(d).then(() => buildItem(d, item));
+    });
+  }
+
+  /**
+   * 経験値チケットを使って、選手に経験値を与える。
+   * @param {string} characterId - キャラクターID
+   * @param {string} itemId - 経験値チケットのアイテムID
+   * @param {number} [count=1] - 使う枚数
+   * @returns {Promise<{ character, levelsGained, pointsGained, exp, item }>} exp は得た経験値の合計
+   */
+  function useExpTicket(characterId, itemId, count) {
+    count = count == null ? 1 : Math.round(Number(count));
+    return load().then(d => {
+      const id = String(characterId);
+      const item = d.itemMaster.get(String(itemId));
+      if (!d.master.has(id)) throw new Error('キャラクター "' + id + '" が見つかりません');
+      if (!item || item.type !== 'exp_ticket') throw new Error('経験値チケットではありません');
+      if (!(count >= 1)) throw new Error('使う枚数が正しくありません');
+      if (itemCount(d, item.id) < count) throw new Error(item.name + 'が足りません');
+      if (progressOf(d, id).level >= VolleyballProgression.MAX_LEVEL) throw new Error('これ以上レベルを上げられません');
+      d.progress.items[item.id] = itemCount(d, item.id) - count;
+      const r = grantExp(d, [id], item.effectValue * count)[0];
+      return save(d).then(() => Object.assign(expResult(d, r), {
+        exp: item.effectValue * count,
+        item: buildItem(d, item)
+      }));
+    });
+  }
+
   // ---------- 所持選手 ----------
 
   /**
@@ -549,6 +706,10 @@
     getGacha: getGacha,
     drawGacha: drawGacha,
     getOwnedCharacters: getOwnedCharacters,
+    getItems: getItems,
+    getShopItems: getShopItems,
+    buyShopItem: buyShopItem,
+    useExpTicket: useExpTicket,
     reload: reload
   });
 })(window);

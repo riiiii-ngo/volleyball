@@ -41,7 +41,7 @@
       id: 'shop', label: 'ショップ', en: 'SHOP', title: 'ショップ',
       items: [
         { id: 'gacha', label: 'ガチャ', en: 'GACHA', screen: 'gacha', featured: true },
-        { id: 'items', label: 'アイテム', en: 'ITEMS' },
+        { id: 'items', label: 'アイテム', en: 'ITEMS', screen: 'shop' },
         { id: 'uniform', label: 'ユニフォーム', en: 'UNIFORM' }
       ]
     },

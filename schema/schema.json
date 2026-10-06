@@ -44,8 +44,8 @@
       "type": "string", "enum": ["WS", "MB", "OP", "SE", "LI"], "x-dbType": "VARCHAR(2)"
     },
     "itemType": {
-      "description": "アイテム種別コード。coin=コイン, token=トークン(交換所用), gacha_ticket=ガチャチケット。必要に応じて追加する。",
-      "type": "string", "enum": ["coin", "token", "gacha_ticket"], "x-dbType": "VARCHAR(32)"
+      "description": "アイテム種別コード。coin=コイン, token=トークン(交換所用), gacha_ticket=ガチャチケット, exp_ticket=経験値チケット(使うと選手が effect_value の経験値を得る)。必要に応じて追加する。",
+      "type": "string", "enum": ["coin", "token", "gacha_ticket", "exp_ticket"], "x-dbType": "VARCHAR(32)"
     },
     "currencyType": {
       "description": "支払いに使う通貨。paid_diamond=有償ダイヤのみ, diamond=ダイヤ(無償を先に消費し、不足分を有償から), coin=コイン, item=アイテム(チケット・トークン。currency_item_id で種類を指定), free=無料(値段は0)。",
@@ -125,10 +125,18 @@
       "properties": {
         "item_id": { "$ref": "#/$defs/masterId", "description": "アイテムID" },
         "item_type": { "$ref": "#/$defs/itemType", "description": "アイテム種別コード" },
-        "item_name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "アイテム名" }
+        "item_name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "アイテム名" },
+        "effect_value": {
+          "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }],
+          "x-dbType": "INTEGER",
+          "description": "使った時の効果量(exp_ticket は獲得経験値)。効果の無い種別は null"
+        }
       },
-      "required": ["item_id", "item_type", "item_name"],
-      "additionalProperties": false
+      "required": ["item_id", "item_type", "item_name", "effect_value"],
+      "additionalProperties": false,
+      "if": { "properties": { "item_type": { "const": "exp_ticket" } } },
+      "then": { "properties": { "effect_value": { "type": "integer" } } },
+      "else": { "properties": { "effect_value": { "type": "null" } } }
     },
 
     "shop_items": {

@@ -12,7 +12,7 @@ export const POSITIONS = ['WS', 'MB', 'OP', 'SE', 'LI'] as const;
 /** WS=ウイングスパイカー, MB=ミドルブロッカー, OP=オポジット, SE=セッター, LI=リベロ */
 export type Position = (typeof POSITIONS)[number];
 
-export const ITEM_TYPES = ['coin', 'token', 'gacha_ticket'] as const;
+export const ITEM_TYPES = ['coin', 'token', 'gacha_ticket', 'exp_ticket'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 export const CURRENCY_TYPES = ['paid_diamond', 'diamond', 'coin', 'item', 'free'] as const;
@@ -72,6 +72,7 @@ export interface Item {
   item_id: MasterId; // PK
   item_type: ItemType;
   item_name: string;
+  effect_value: number | null; // 使った時の効果量(exp_ticket は獲得経験値)。効果の無い種別は null
 }
 
 /** 4. ショップ商品マスタ */

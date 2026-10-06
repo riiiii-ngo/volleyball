@@ -44,10 +44,13 @@ CREATE TABLE characters (
 );
 
 -- 3. アイテム情報マスタ
+--   effect_value: 使った時の効果量(exp_ticket は獲得経験値)。効果の無い種別は NULL。
 CREATE TABLE items (
-    item_id    VARCHAR(32) PRIMARY KEY,
-    item_type  VARCHAR(32) NOT NULL CHECK (item_type IN ('coin', 'token', 'gacha_ticket')),
-    item_name  VARCHAR(64) NOT NULL
+    item_id       VARCHAR(32) PRIMARY KEY,
+    item_type     VARCHAR(32) NOT NULL CHECK (item_type IN ('coin', 'token', 'gacha_ticket', 'exp_ticket')),
+    item_name     VARCHAR(64) NOT NULL,
+    effect_value  INTEGER CHECK (effect_value >= 1),
+    CHECK ((item_type = 'exp_ticket') = (effect_value IS NOT NULL))
 );
 
 -- 4. ショップ商品マスタ

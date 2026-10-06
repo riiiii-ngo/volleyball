@@ -7,6 +7,7 @@
  *   - チーム: players / player_characters / party_decks / party_deck_members から、GAME_TEAMS で指定したデッキを組み立てる。
  *   - ガチャ: gachas / gacha_details / items。
  *   - 所持選手: player_characters のうち PLAYER_ID の行(初期の所持選手)。
+ *   - アイテム: items / shop_items と、player_items のうち PLAYER_ID の行(初期の所持アイテム)。
  * セーブデータ(レベル・育成・ガチャで獲得した所持選手など)は静的ファイルに書き込めないので、ブラウザの localStorage に保存する
  * (そのブラウザ・端末の中だけに残る。DB に移したらサーバー側に保存される想定)。
  *
@@ -121,6 +122,21 @@
             rates: details.filter(r => r.gacha_id === g.gacha_id)
               .map(r => ({ characterId: r.character_id, probability: r.probability }))
           };
+        }));
+      },
+
+      loadItems() {
+        return Promise.all(['items', 'shop_items', 'player_items'].map(loadTable)).then(([items, shopItems, owned]) => ({
+          items: items.map(i => ({ id: i.item_id, type: i.item_type, name: i.item_name, effectValue: i.effect_value })),
+          shopItems: shopItems.map(s => ({
+            id: s.shop_item_id,
+            itemId: s.item_id,
+            quantity: s.quantity,
+            currencyType: s.currency_type,
+            currencyItemId: s.currency_item_id,
+            price: s.price
+          })),
+          owned: owned.filter(r => r.player_id === PLAYER_ID).map(r => ({ itemId: r.item_id, quantity: r.quantity }))
         }));
       },
 

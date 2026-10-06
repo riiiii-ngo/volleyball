@@ -4,6 +4,7 @@
  *   #/training/<id>   その選手の育成ポイントをステータスに割り振る
  * 割り振りは「＋/−」で仮決めし、「決定」で VolleyballData.allocatePoints() に保存する。
  * 保存済みの割り振りは戻せない(−は今回仮決めした分だけ)。
+ * 割り振り画面では、所持している経験値チケットを使ってレベルを上げられる(VolleyballData.useExpTicket())。
  */
 (function () {
   'use strict';
@@ -30,7 +31,7 @@
     VolleyballData.getTeam('player').then(team => {
       if (state.disposed) return;
       content.innerHTML =
-        '<p class="training-hint">フリー練習のラリーで経験値がたまり、レベルが上がると育成ポイントがもらえます。</p>' +
+        '<p class="training-hint">フリー練習のラリーや経験値チケットで経験値がたまり、レベルが上がると育成ポイントがもらえます。</p>' +
         '<ul class="training-list">' + team.members.map((m, i) => {
           const c = m.character;
           return '<li style="animation-delay:' + (i * 50) + 'ms"><button type="button" class="training-row" data-id="' + esc(c.id) + '">' +
@@ -60,7 +61,9 @@
     const headingJa = el.querySelector('.menu-heading-ja');
 
     let character = null;
+    let tickets = []; // 所持している経験値チケット
     let pending = {}; // 今回仮決めしている上げ幅 { stat: n }
+    let busy = false;
 
     function pendingTotal() {
       return Object.keys(pending).reduce((sum, k) => sum + pending[k], 0);
@@ -76,6 +79,7 @@
             '<span class="roster-pos">' + esc(c.position) + '</span>' +
             VolleyballUI.levelHtml(c) +
           '</div>' +
+          ticketsHtml(c) +
           '<p class="training-left">育成ポイント <b class="' + (left > 0 ? 'has-points' : '') + '">' + left + '</b> / ' + c.points + '</p>' +
           '<ul class="training-stats">' + VolleyballData.STATS.map(s => {
             const add = pending[s.key] || 0;
@@ -110,6 +114,24 @@
           draw();
         });
       });
+      content.querySelectorAll('.training-ticket .shop-buy-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (busy) return;
+          busy = true;
+          VolleyballData.useExpTicket(c.id, btn.dataset.item).then(r => {
+            if (state.disposed) return;
+            character = r.character;
+            return VolleyballData.getItems('exp_ticket').then(list => {
+              if (state.disposed) return;
+              tickets = list;
+              draw();
+              app.toast(r.levelsGained > 0
+                ? 'LEVEL UP! ' + r.character.name + ' Lv.' + r.character.level + '(育成ポイント+' + r.pointsGained + ')'
+                : r.character.name + 'が経験値を' + r.exp + '獲得しました');
+            });
+          }).catch(err => app.toast(err.message)).then(() => { busy = false; });
+        });
+      });
       content.querySelector('.is-reset').addEventListener('click', () => { pending = {}; draw(); });
       content.querySelector('.is-apply').addEventListener('click', () => {
         VolleyballData.allocatePoints(c.id, pending).then(updated => {
@@ -122,10 +144,27 @@
       });
     }
 
-    VolleyballData.getCharacter(id).then(c => {
+    // 経験値チケット(持っていなければショップへの案内)
+    function ticketsHtml(c) {
+      const isMax = c.expToNext === 0;
+      return '<p class="training-section-title">経験値チケット<a href="#/shop">ショップへ ›</a></p>' +
+        (tickets.length === 0
+          ? '<p class="training-hint">経験値チケットを持っていません。ショップのアイテムで手に入ります。</p>'
+          : '<ul class="training-tickets">' + tickets.map(t =>
+            '<li class="training-ticket">' +
+              '<span class="training-ticket-main">' +
+                '<span class="training-ticket-name">' + esc(t.name) + '</span>' +
+                '<span class="training-ticket-info">経験値+' + t.effectValue + ' / 所持 <b>' + t.count + '</b></span>' +
+              '</span>' +
+              '<button type="button" class="shop-buy-btn" data-item="' + esc(t.id) + '"' + (isMax ? ' disabled' : '') + '>使う</button>' +
+            '</li>').join('') + '</ul>');
+    }
+
+    Promise.all([VolleyballData.getCharacter(id), VolleyballData.getItems('exp_ticket')]).then(([c, list]) => {
       if (state.disposed) return;
       if (!c) { app.go('training', [], { replace: true }); return; }
       character = c;
+      tickets = list;
       draw();
     }).catch(err => {
       if (state.disposed) return;
