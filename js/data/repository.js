@@ -24,6 +24,7 @@
  *                               playerCharacterId はその枠の所持選手(player_characters)の ID
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
+ *   loadPlayer()            → { id, name, paidDiamonds, freeDiamonds, coins }   操作しているプレイヤー
  *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行>, maxPlayerCharacterId? }
  *                               初期の所持選手。maxPlayerCharacterId は全プレイヤーの行の最大ID(新しい行の採番用)
  *   loadItems()             → { items: Array<{ id, type, name, effectValue|null }>,
@@ -348,14 +349,30 @@
     return { master: master, shopItems: shopItems, owned: owned };
   }
 
+  function toAmount(v) {
+    return Math.max(0, Math.round(Number(v) || 0));
+  }
+
+  // プレイヤー(名前・所持通貨)の補正。
+  function normalizePlayer(raw) {
+    if (!raw) throw new Error('プレイヤーのデータがありません');
+    return Object.freeze({
+      id: raw.id,
+      name: String(raw.name || 'プレイヤー'),
+      paidDiamonds: toAmount(raw.paidDiamonds),
+      freeDiamonds: toAmount(raw.freeDiamonds),
+      coins: toAmount(raw.coins)
+    });
+  }
+
   function load() {
     if (!source) throw new Error('VolleyballData.configure() が呼ばれていません');
     if (!cache) {
       cache = Promise.all([
         source.loadCharacters(), source.loadTeams(), source.loadProgress(), source.loadGachas(), source.loadOwnedCharacters(),
-        source.loadItems()
+        source.loadItems(), source.loadPlayer()
       ])
-        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned, rawItems]) => {
+        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned, rawItems, rawPlayer]) => {
           const master = new Map();
           rawChars.forEach(raw => {
             const c = normalizeMaster(raw);
@@ -384,6 +401,7 @@
             initialItems: items.owned,
             gachas: rawGachas.map(g => normalizeGacha(g, master)),
             playerId: playerId,
+            player: normalizePlayer(rawPlayer),
             initialOwned: initialOwned,
             // 新しい所持選手の採番用(他のプレイヤーの行とIDが重ならないように)
             maxPlayerCharacterId: Math.max(0, Math.round(Number(rawOwned.maxPlayerCharacterId)) || 0)
@@ -432,21 +450,7 @@
     return row;
   }
 
-  /**
-   * 経験値を与える。レベルが上がれば育成ポイントも増える。
-   * @param {number[]} playerCharacterIds - 所持選手ID(所持していないIDは無視する)
-   * @param {number} amount
-   * @returns {Promise<Array<{character, levelsGained:number, pointsGained:number}>>}
-   */
-  function addExp(playerCharacterIds, amount) {
-    return load().then(d => {
-      const rows = playerCharacterIds.map(id => ownedRow(d, id)).filter(Boolean);
-      const results = rows.map(row => grantExp(d, row, amount));
-      return save(d).then(() => results.map(r => expResult(d, r)));
-    });
-  }
-
-  // セーブ上の経験値を増やす(保存はしない)。
+  // セーブ上の経験値を増やす(保存はしない)。経験値が入るのは経験値チケットを使った時だけ。
   function grantExp(d, row, amount) {
     const p = progressOf(d, row);
     const r = VolleyballProgression.addExp(p, amount);
@@ -706,6 +710,19 @@
     });
   }
 
+  // ---------- プレイヤー ----------
+
+  /**
+   * 操作しているプレイヤーの名前と所持通貨。diamonds は有償+無償の合計。
+   * 今は通貨を使う・増やす処理が無いので、マスタ(players)の値のまま。
+   * @returns {Promise<{ id, name, diamonds, paidDiamonds, freeDiamonds, coins }>}
+   */
+  function getPlayer() {
+    return load().then(d => Object.freeze(Object.assign({}, d.player, {
+      diamonds: d.player.paidDiamonds + d.player.freeDiamonds
+    })));
+  }
+
   // ---------- 所持選手 ----------
 
   /**
@@ -742,7 +759,7 @@
     registerSource: registerSource,
     configure: configure,
     getTeam: getTeam,
-    addExp: addExp,
+    getPlayer: getPlayer,
     allocatePoints: allocatePoints,
     getActiveGachas: getActiveGachas,
     getGacha: getGacha,

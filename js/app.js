@@ -14,6 +14,10 @@
  *   - args: ハッシュの引数(文字列配列)。
  *   - 戻り値の update(args) は、同じ画面のまま引数だけ変わった時(タブ切り替え等)に呼ばれる。
  *     無ければ作り直す。unmount() は画面を離れる直前に呼ばれる(ループ停止やリスナー解除用)。
+ *   - hideHeader: true なら画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)を出さない(タイトル・試合中など)。
+ *
+ * 共通ヘッダーは start({ header }) で渡す(js/screens/header.js の VolleyballHeader.create())。
+ * 画面が切り替わるたびに表示/非表示を切り替えて中身を読み直す。所持通貨が変わった時は app.refreshHeader() を呼ぶ。
  */
 (function (global) {
   'use strict';
@@ -25,6 +29,7 @@
   let root = null;
   let toastEl = null;
   let toastTimer = null;
+  let header = null; // { show(visible), refresh() }
   let current = null; // { name, el, instance }
 
   function register(name, def) {
@@ -53,6 +58,13 @@
       if (current.instance.unmount) current.instance.unmount();
       current.el.remove();
       current = null;
+    }
+
+    const showHeader = !!header && !screens[route.name].hideHeader;
+    document.body.classList.toggle('has-header', showHeader);
+    if (header) {
+      header.show(showHeader);
+      if (showHeader) header.refresh();
     }
 
     const el = document.createElement('div');
@@ -109,20 +121,26 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('is-visible'), 1800);
   }
 
+  function refreshHeader() {
+    if (header) header.refresh();
+  }
+
   function start(options) {
     root = options.root;
     toastEl = options.toast;
+    header = options.header || null;
     window.addEventListener('hashchange', render);
     render();
   }
 
-  const api = Object.freeze({ go: go, toast: toast, loadScripts: loadScripts });
+  const api = Object.freeze({ go: go, toast: toast, loadScripts: loadScripts, refreshHeader: refreshHeader });
 
   global.VolleyballApp = Object.freeze({
     register: register,
     start: start,
     go: go,
     toast: toast,
-    loadScripts: loadScripts
+    loadScripts: loadScripts,
+    refreshHeader: refreshHeader
   });
 })(window);

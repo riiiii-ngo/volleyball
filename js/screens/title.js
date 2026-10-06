@@ -5,6 +5,7 @@
   'use strict';
 
   VolleyballApp.register('title', {
+    hideHeader: true,
     mount(el, args, app) {
       el.classList.add('title-screen');
       el.tabIndex = -1;

@@ -1,0 +1,98 @@
+/* 画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)。js/screens/header.js */
+:root { --header-h: 48px; }
+
+.app-header {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 5; /* 画面の上。ガチャ演出などのオーバーレイ(z-index 10)には隠れる */
+  padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  background: var(--navy-950);
+  border-bottom: 2px solid var(--navy-700);
+}
+.app-header[hidden] { display: none; }
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--header-h);
+  max-width: var(--content-max, 560px);
+  margin: 0 auto;
+}
+
+/* ヘッダーがある時は、画面をヘッダーの下から始める(上の余白はヘッダー側で取る) */
+body.has-header .screen { top: calc(var(--header-h) + 2px + env(safe-area-inset-top)); }
+body.has-header .menu-header { padding-top: 14px; }
+
+.app-header-user {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 900;
+  font-size: 15px;
+}
+.app-header-user .app-header-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  box-sizing: border-box;
+  fill: var(--navy-950);
+  background: var(--cream);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+.app-header-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header-wallet {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-header-currency {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-width: 82px;
+  box-sizing: border-box;
+  padding: 0 14px 0 10px;
+  background: var(--navy-850);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+.app-header-icon { width: 18px; height: 18px; flex: none; }
+.app-header-icon.is-diamond { fill: #6fd8ff; }
+.app-header-icon.is-coin { fill: var(--yellow); }
+.app-header-amount {
+  flex: 1;
+  text-align: right;
+  font-family: var(--font-en);
+  font-size: 20px;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 狭いスマホ:名前と通貨を詰める */
+@media (max-width: 360px) {
+  .app-header-inner { gap: 8px; }
+  .app-header-user { font-size: 13px; }
+  .app-header-wallet { gap: 4px; }
+  .app-header-currency { min-width: 0; padding: 0 10px 0 8px; }
+  .app-header-amount { font-size: 18px; }
+}
+/* 横向きのスマホなど高さが低い画面 */
+@media (orientation: landscape) and (max-height: 520px) {
+  :root { --header-h: 40px; }
+  body.has-header .menu-header { padding-top: 8px; }
+}

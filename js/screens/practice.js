@@ -4,7 +4,7 @@
  * (タイトル/メニューの表示を重くしないため)。離れる時は VolleyballGame の destroy() で
  * 描画ループと WebGL を確実に止める。
  * 出場チームは VolleyballData から読む(自チーム 'player'、相手 'cpu')。
- * ラリーが終わるたびにスコアを更新し、自チーム全員に経験値を与える(レベルアップはトーストで通知)。
+ * ラリーが終わるたびにスコアを更新する(試合では経験値は入らない。レベルは経験値チケットでだけ上がる)。
  */
 (function () {
   'use strict';
@@ -24,6 +24,7 @@
   const REASON_LABELS = { in: '', out: 'OUT', net: 'NET', block: 'BLOCK', blockout: 'BLOCK OUT' };
 
   VolleyballApp.register('practice', {
+    hideHeader: true,
     mount(el, args, app) {
       el.classList.add('court-screen');
       el.innerHTML =
@@ -64,7 +65,7 @@
           joystickParent: el,
           nearTeam: nearTeam,
           farTeam: farTeam,
-          onRallyEnd: result => onRallyEnd(result, nearTeam)
+          onRallyEnd: onRallyEnd
         });
         scoreEl.querySelector('.court-score-team.is-near').textContent = nearTeam.name;
         scoreEl.querySelector('.court-score-team.is-far').textContent = farTeam.name;
@@ -75,7 +76,7 @@
         throw err; // エラーバナーにも出す
       });
 
-      function onRallyEnd(result, nearTeam) {
+      function onRallyEnd(result) {
         score[result.winner]++;
         scoreEl.querySelector('.court-score-num.is-near').textContent = score.near;
         scoreEl.querySelector('.court-score-num.is-far').textContent = score.far;
@@ -85,17 +86,6 @@
         reasonEl.textContent = REASON_LABELS[result.reason] || '';
         clearTimeout(reasonTimer);
         reasonTimer = setTimeout(() => { reasonEl.textContent = ''; }, 1500);
-
-        // 自チーム全員に経験値。レベルが上がった選手をまとめて知らせる。
-        const exp = result.winner === 'near' ? VolleyballProgression.EXP_RALLY_WIN : VolleyballProgression.EXP_RALLY_LOSE;
-        VolleyballData.addExp(nearTeam.members.map(m => m.character.playerCharacterId), exp).then(results => {
-          if (disposed) return;
-          const ups = results.filter(r => r.levelsGained > 0);
-          if (!ups.length) return;
-          const first = ups[0].character;
-          const who = first.name + (ups.length > 1 ? ' ほか' + (ups.length - 1) + '人' : '');
-          app.toast('LEVEL UP! ' + who + ' Lv.' + first.level + '(育成ポイント+' + ups[0].pointsGained + ')');
-        });
       }
 
       return {

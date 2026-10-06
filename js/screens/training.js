@@ -32,7 +32,7 @@
     VolleyballData.getOwnedCharacters().then(owned => {
       if (state.disposed) return;
       content.innerHTML =
-        '<p class="training-hint">フリー練習のラリーや経験値チケットで経験値がたまり、レベルが上がると育成ポイントがもらえます。</p>' +
+        '<p class="training-hint">経験値チケットで経験値がたまり(試合では経験値は入りません)、レベルが上がると育成ポイントがもらえます。</p>' +
         '<ul class="training-list">' + owned.slice().sort(VolleyballUI.compareOwned).map((c, i) => {
           return '<li style="animation-delay:' + (Math.min(i, 12) * 50) + 'ms"><button type="button" class="training-row' + (c.team ? ' is-starter' : '') + '" data-id="' + c.playerCharacterId + '">' +
             '<span class="roster-number">' + esc(c.number != null ? c.number : '-') + '</span>' +

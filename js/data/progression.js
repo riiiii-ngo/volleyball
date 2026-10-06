@@ -9,10 +9,6 @@
   const MAX_LEVEL = 50;
   const POINTS_PER_LEVEL = 3;  // レベルが1上がるごとにもらえる育成ポイント
 
-  // フリー練習でラリーが終わるたびに、自チーム全員がもらえる経験値
-  const EXP_RALLY_WIN = 20;
-  const EXP_RALLY_LOSE = 5;
-
   // 今のレベルから次のレベルに上がるのに必要な経験値。Lv1→2: 100, Lv2→3: 120, …
   function expToNext(level) {
     return level >= MAX_LEVEL ? 0 : 80 + level * 20;
@@ -47,8 +43,6 @@
   global.VolleyballProgression = Object.freeze({
     MAX_LEVEL: MAX_LEVEL,
     POINTS_PER_LEVEL: POINTS_PER_LEVEL,
-    EXP_RALLY_WIN: EXP_RALLY_WIN,
-    EXP_RALLY_LOSE: EXP_RALLY_LOSE,
     expToNext: expToNext,
     addExp: addExp
   });

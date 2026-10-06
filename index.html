@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="css/training.css">
 <link rel="stylesheet" href="css/gacha.css">
 <link rel="stylesheet" href="css/shop.css">
+<link rel="stylesheet" href="css/header.css">
 </head>
 <body>
 <!--
@@ -22,6 +23,7 @@
   に応じて js/screens/*.js の画面を #screenRoot に1つだけ生成する。
   新しい画面は js/screens/ にファイルを作って VolleyballApp.register() し、下で読み込むだけ。
 -->
+<header id="appHeader"></header>
 <div id="screenRoot"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="errorBanner" class="error-banner"></div>
@@ -58,6 +60,7 @@
 </script>
 <script src="js/app.js"></script>
 <script src="js/screens/ui.js"></script>
+<script src="js/screens/header.js"></script>
 <script src="js/screens/title.js"></script>
 <script src="js/screens/menu.js"></script>
 <script src="js/screens/practice.js"></script>
@@ -68,7 +71,8 @@
 <script>
   VolleyballApp.start({
     root: document.getElementById('screenRoot'),
-    toast: document.getElementById('toast')
+    toast: document.getElementById('toast'),
+    header: VolleyballHeader.create(document.getElementById('appHeader'))
   });
 </script>
 </body>

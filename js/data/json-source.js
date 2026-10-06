@@ -6,6 +6,7 @@
  *   - キャラクター: characters.json。ステータスは Lv1 の値(min_*)を使う。背番号は下のチームのデッキから取る。
  *   - チーム: players / player_characters / party_decks / party_deck_members から、GAME_TEAMS で指定したデッキを組み立てる。
  *   - ガチャ: gachas / gacha_details / items。
+ *   - プレイヤー: players のうち PLAYER_ID の行(名前・ダイヤ・コイン)。
  *   - 所持選手: player_characters のうち PLAYER_ID の行(初期の所持選手)。
  *   - アイテム: items / shop_items と、player_items のうち PLAYER_ID の行(初期の所持アイテム)。
  * セーブデータ(レベル・育成・ガチャで獲得した所持選手など)は静的ファイルに書き込めないので、ブラウザの localStorage に保存する
@@ -138,6 +139,14 @@
           })),
           owned: owned.filter(r => r.player_id === PLAYER_ID).map(r => ({ itemId: r.item_id, quantity: r.quantity }))
         }));
+      },
+
+      loadPlayer() {
+        return loadTable('players').then(rows => {
+          const p = rows.find(r => r.player_id === PLAYER_ID);
+          if (!p) throw new Error('プレイヤー ' + PLAYER_ID + ' が players にありません');
+          return { id: p.player_id, name: p.player_name, paidDiamonds: p.paid_diamonds, freeDiamonds: p.free_diamonds, coins: p.coins };
+        });
       },
 
       loadOwnedCharacters() {
