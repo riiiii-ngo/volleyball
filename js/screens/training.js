@@ -1,7 +1,8 @@
 /**
  * 選手育成画面。
- *   #/training        自チームの選手一覧(レベル・育成ポイント)
- *   #/training/<id>   その選手の育成ポイントをステータスに割り振る
+ *   #/training                所持選手の一覧(レベル・育成ポイント。スタメンが先頭)
+ *   #/training/<所持選手ID>    その選手の育成ポイントをステータスに割り振る
+ * レベル・育成は所持選手1体(player_character_id)ごと。
  * 割り振りは「＋/−」で仮決めし、「決定」で VolleyballData.allocatePoints() に保存する。
  * 保存済みの割り振りは戻せない(−は今回仮決めした分だけ)。
  * 割り振り画面では、所持している経験値チケットを使ってレベルを上げられる(VolleyballData.useExpTicket())。
@@ -28,16 +29,16 @@
     el.querySelector('.roster-back').addEventListener('click', () => app.go('menu', ['team']));
     const content = el.querySelector('.roster-content');
 
-    VolleyballData.getTeam('player').then(team => {
+    VolleyballData.getOwnedCharacters().then(owned => {
       if (state.disposed) return;
       content.innerHTML =
         '<p class="training-hint">フリー練習のラリーや経験値チケットで経験値がたまり、レベルが上がると育成ポイントがもらえます。</p>' +
-        '<ul class="training-list">' + team.members.map((m, i) => {
-          const c = m.character;
-          return '<li style="animation-delay:' + (i * 50) + 'ms"><button type="button" class="training-row" data-id="' + esc(c.id) + '">' +
+        '<ul class="training-list">' + owned.slice().sort(VolleyballUI.compareOwned).map((c, i) => {
+          return '<li style="animation-delay:' + (Math.min(i, 12) * 50) + 'ms"><button type="button" class="training-row' + (c.team ? ' is-starter' : '') + '" data-id="' + c.playerCharacterId + '">' +
             '<span class="roster-number">' + esc(c.number != null ? c.number : '-') + '</span>' +
             '<span class="training-row-main">' +
-              '<span class="roster-name">' + esc(c.name) + '</span>' +
+              '<span class="training-row-name">' + VolleyballUI.starsHtml(c.rarity) + '<span class="roster-name">' + esc(c.name) + '</span>' +
+                '<span class="training-row-role">' + esc(VolleyballUI.roleLabel(c)) + '</span></span>' +
               VolleyballUI.levelHtml(c) +
             '</span>' +
             VolleyballUI.pointsHtml(c.points) +
@@ -118,7 +119,7 @@
         btn.addEventListener('click', () => {
           if (busy) return;
           busy = true;
-          VolleyballData.useExpTicket(c.id, btn.dataset.item).then(r => {
+          VolleyballData.useExpTicket(c.playerCharacterId, btn.dataset.item).then(r => {
             if (state.disposed) return;
             character = r.character;
             return VolleyballData.getItems('exp_ticket').then(list => {
@@ -134,7 +135,7 @@
       });
       content.querySelector('.is-reset').addEventListener('click', () => { pending = {}; draw(); });
       content.querySelector('.is-apply').addEventListener('click', () => {
-        VolleyballData.allocatePoints(c.id, pending).then(updated => {
+        VolleyballData.allocatePoints(c.playerCharacterId, pending).then(updated => {
           if (state.disposed) return;
           character = updated;
           pending = {};
@@ -160,7 +161,7 @@
             '</li>').join('') + '</ul>');
     }
 
-    Promise.all([VolleyballData.getCharacter(id), VolleyballData.getItems('exp_ticket')]).then(([c, list]) => {
+    Promise.all([VolleyballData.getOwnedCharacter(id), VolleyballData.getItems('exp_ticket')]).then(([c, list]) => {
       if (state.disposed) return;
       if (!c) { app.go('training', [], { replace: true }); return; }
       character = c;

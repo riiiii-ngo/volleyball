@@ -143,7 +143,8 @@
       loadOwnedCharacters() {
         return loadTable('player_characters').then(rows => ({
           playerId: PLAYER_ID,
-          characters: rows.filter(r => r.player_id === PLAYER_ID)
+          characters: rows.filter(r => r.player_id === PLAYER_ID),
+          maxPlayerCharacterId: rows.reduce((max, r) => Math.max(max, r.player_character_id), 0)
         }));
       },
 

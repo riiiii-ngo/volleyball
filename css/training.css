@@ -142,3 +142,11 @@
 @media (prefers-reduced-motion: reduce) {
   .training-list li { animation: none; }
 }
+
+/* 一覧:名前の行(レア度・名前・役割)。控えは左の線を暗くする */
+.training-row-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.training-row-name .gacha-stars { font-size: 10px; letter-spacing: 0; }
+.training-row-name .roster-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.training-row-role { flex: none; font-size: 11px; font-weight: 700; color: var(--navy-300); }
+.training-row:not(.is-starter) { border-left-color: var(--navy-700); }
+.training-row:not(.is-starter) .roster-number { color: var(--navy-300); }

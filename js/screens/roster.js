@@ -6,33 +6,12 @@
 (function () {
   'use strict';
 
-  // スロット → 表示用の役割名(試合の立ち位置)
-  const SLOT_LABELS = {
-    'front-1': '前衛レフト',
-    'front-2': '前衛センター',
-    'front-3': '前衛ライト',
-    'back-1': '後衛',
-    'back-2': '後衛',
-    'back-3': '後衛',
-    server: 'サーバー'
-  };
-
-  const SLOT_ORDER = Object.keys(SLOT_LABELS);
-
   const escapeHtml = VolleyballUI.escapeHtml;
 
-  // 並び順:スタメン(試合の立ち位置順) → 控え(レア度の高い順 → 獲得順)
-  function compareOwned(a, b) {
-    if (!!a.team !== !!b.team) return a.team ? -1 : 1;
-    if (a.team) return SLOT_ORDER.indexOf(a.team.slot) - SLOT_ORDER.indexOf(b.team.slot);
-    return (b.character.rarity - a.character.rarity) || (a.playerCharacterId - b.playerCharacterId);
-  }
-
-  function cardHtml(owned, index) {
-    const c = owned.character;
+  function cardHtml(c, index) {
     const stats = VolleyballData.ALL_STATS.map(s => {
-      const v = owned.stats[s.key];
-      const bonus = owned.bonus[s.key];
+      const v = c.allStats[s.key];
+      const bonus = c.bonus[s.key] || 0;
       return '<li class="roster-stat' + (v >= 75 ? ' is-high' : '') + '">' +
         '<span class="roster-stat-label">' + s.label + '</span>' +
         '<span class="roster-stat-bar"><span style="width:' + v + '%"></span></span>' +
@@ -43,12 +22,12 @@
       '</li>';
     }).join('');
     const profile = [
-      owned.team ? SLOT_LABELS[owned.team.slot] || owned.team.slot : '控え',
+      VolleyballUI.roleLabel(c),
       c.height ? c.height + 'cm' : ''
     ].filter(Boolean).join(' / ');
-    const number = owned.team && owned.team.number != null ? owned.team.number : '-';
+    const number = c.number != null ? c.number : '-';
 
-    return '<li class="roster-card' + (owned.team ? ' is-starter' : '') + '" style="animation-delay:' + Math.min(index, 12) * 50 + 'ms">' +
+    return '<li class="roster-card' + (c.team ? ' is-starter' : '') + '" style="animation-delay:' + Math.min(index, 12) * 50 + 'ms">' +
       '<div class="roster-card-head">' +
         '<span class="roster-number">' + escapeHtml(number) + '</span>' +
         '<span class="roster-name-block">' +
@@ -58,8 +37,7 @@
         '</span>' +
         '<span class="roster-pos" title="' + escapeHtml(VolleyballData.POSITIONS[c.position]) + '">' + escapeHtml(c.position) + '</span>' +
       '</div>' +
-      '<div class="roster-progress">' + VolleyballUI.levelHtml(owned) +
-        (owned.points != null ? VolleyballUI.pointsHtml(owned.points) : '') + '</div>' +
+      '<div class="roster-progress">' + VolleyballUI.levelHtml(c) + VolleyballUI.pointsHtml(c.points) + '</div>' +
       '<ul class="roster-stats">' + stats + '</ul>' +
     '</li>';
   }
@@ -86,7 +64,7 @@
         const starters = owned.filter(o => o.team).length;
         content.innerHTML =
           '<p class="roster-team">所持選手<span>' + owned.length + '人(スタメン ' + starters + '人)</span></p>' +
-          '<ul class="roster-list">' + owned.slice().sort(compareOwned).map(cardHtml).join('') + '</ul>';
+          '<ul class="roster-list">' + owned.slice().sort(VolleyballUI.compareOwned).map(cardHtml).join('') + '</ul>';
       }).catch(err => {
         if (disposed) return;
         content.innerHTML = '<p class="roster-status is-error">' + escapeHtml(err.message) + '</p>';

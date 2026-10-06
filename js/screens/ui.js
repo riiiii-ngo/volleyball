@@ -30,5 +30,36 @@
     return '<span class="gacha-stars is-r' + rarity + '" aria-label="レア度' + rarity + '">' + '★'.repeat(rarity) + '</span>';
   }
 
-  global.VolleyballUI = Object.freeze({ escapeHtml: escapeHtml, levelHtml: levelHtml, pointsHtml: pointsHtml, starsHtml: starsHtml });
+  // 試合の立ち位置(slot) → 表示用の役割名
+  const SLOT_LABELS = Object.freeze({
+    'front-1': '前衛レフト',
+    'front-2': '前衛センター',
+    'front-3': '前衛ライト',
+    'back-1': '後衛',
+    'back-2': '後衛',
+    'back-3': '後衛',
+    server: 'サーバー'
+  });
+  const SLOT_ORDER = Object.keys(SLOT_LABELS);
+
+  // 所持選手の並び順:スタメン(試合の立ち位置順) → 控え(レア度の高い順 → 獲得順)
+  function compareOwned(a, b) {
+    if (!!a.team !== !!b.team) return a.team ? -1 : 1;
+    if (a.team) return SLOT_ORDER.indexOf(a.team.slot) - SLOT_ORDER.indexOf(b.team.slot);
+    return (b.rarity - a.rarity) || (a.playerCharacterId - b.playerCharacterId);
+  }
+
+  // 役割名(スタメンなら立ち位置、それ以外は「控え」)
+  function roleLabel(c) {
+    return c.team ? SLOT_LABELS[c.team.slot] || c.team.slot : '控え';
+  }
+
+  global.VolleyballUI = Object.freeze({
+    escapeHtml: escapeHtml,
+    levelHtml: levelHtml,
+    pointsHtml: pointsHtml,
+    starsHtml: starsHtml,
+    compareOwned: compareOwned,
+    roleLabel: roleLabel
+  });
 })(window);

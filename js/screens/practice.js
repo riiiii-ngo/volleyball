@@ -88,7 +88,7 @@
 
         // 自チーム全員に経験値。レベルが上がった選手をまとめて知らせる。
         const exp = result.winner === 'near' ? VolleyballProgression.EXP_RALLY_WIN : VolleyballProgression.EXP_RALLY_LOSE;
-        VolleyballData.addExp(nearTeam.members.map(m => m.character.id), exp).then(results => {
+        VolleyballData.addExp(nearTeam.members.map(m => m.character.playerCharacterId), exp).then(results => {
           if (disposed) return;
           const ups = results.filter(r => r.levelsGained > 0);
           if (!ups.length) return;

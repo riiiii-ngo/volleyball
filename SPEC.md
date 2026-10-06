@@ -59,7 +59,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 | `#/menu/<タブID>` | メニュー(`match`/`team`/`shop`/`social`/`other`) | `js/screens/menu.js` |
 | `#/practice` | フリー練習(3Dコート) | `js/screens/practice.js` |
 | `#/roster` | 選手一覧(チーム > 選手一覧) | `js/screens/roster.js` |
-| `#/training`, `#/training/<キャラID>` | 選手育成(チーム > 選手育成)。一覧 / ポイント割り振り | `js/screens/training.js` |
+| `#/training`, `#/training/<所持選手ID>` | 選手育成(チーム > 選手育成)。所持選手の一覧 / ポイント割り振り・経験値チケット | `js/screens/training.js` |
 | `#/gacha`, `#/gacha/<ガチャID>` | ガチャ(ショップ > ガチャ)。開催中の一覧 / 引く画面(結果も同じ画面で表示) | `js/screens/gacha.js` |
 | `#/shop` | ショップのアイテム(ショップ > アイテム)。商品の一覧と購入 | `js/screens/shop.js` |
 
@@ -115,14 +115,16 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
     - 相手`cpu`(紅陵高校)=プレイヤー2のデッキ1:`front-1`(アタッカー)←WS1、`front-2`(セッター)←Se、`front-3`←MB1、`back-1`←WS2、`back-2`←Li、`back-3`←OP
     - 試合はまだ6人制の立ち位置だけなので、MB2は使わない。
   - デッキが見つからない・使う枠が空いている時は、読み込みエラーで止まる。
-- ゲームのレベル・経験値・育成は今まで通りセーブ(`localStorage`、選手ID単位)で管理していて、`player_characters`の`level`/`exp`/現在値はまだゲームから読んでいない。
+- レベル・経験値・育成は所持選手1体(`player_character_id`)ごとにセーブで管理する。初期値は`player_characters`の行の`level`/`exp`、ステータスの基本値は行の現在値(試合の自チームもこの値を使う)。相手チーム(CPU)はマスタのLv1の値。
   - ガチャ:`gachas`/`gacha_details`/`items`を読んで渡す(支払いがアイテムの時はアイテム名も)。所持選手は`player_characters`のうち操作中のプレイヤー(`PLAYER_ID`=1)の行を初期の所持選手として渡す。
 
 ### 保存先の切り替え(JSON → DB)
-- データは「マスタ」(キャラクターの初期値・チーム編成。ゲームからは書き換えない)と「セーブ」(キャラクターごとのレベル・経験値・育成ポイント・割り振ったステータス)の2種類。画面に渡すキャラクターは、マスタの基本ステータスにセーブの割り振り分を足したもの(`stats`)で、`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`も持つ。
-- ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getCharacters()`/`getCharacter(id)`/`getTeam(id)`/`reload()`。書き込み:`addExp(ids, amount)`(レベルアップ結果を返す)/`allocatePoints(id, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)。保存先の違いは「ソース」が吸収する。
+- データは「マスタ」(キャラクターの初期値・チーム編成・初期の所持選手/所持アイテム。ゲームからは書き換えない)と「セーブ」(所持選手1体ごとのレベル・経験値・育成ポイント・割り振ったステータス、ガチャで獲得した所持選手、アイテムの所持数)の2種類。画面に渡す選手は、所持選手の行のステータスにセーブの割り振り分を足したもの(試合用8項目の`stats`、全10項目の`allStats`)で、`playerCharacterId`・`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`・`team`(自チームでの立ち位置と背番号。控えは`null`)も持つ。同じ選手を2体持っていても、レベル・育成は別々。
+- ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getTeam(id)`/`getOwnedCharacters()`/`getOwnedCharacter(所持選手ID)`/`reload()`など。書き込み:`addExp(所持選手IDの配列, amount)`(レベルアップ結果を返す)/`allocatePoints(所持選手ID, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)/`useExpTicket(所持選手ID, アイテムID)`など。保存先の違いは「ソース」が吸収する。
 - 使うソースは`index.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
-- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ characters: { [id]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], items: { [アイテムID]: 所持数 } }`)の7つ。
+- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], items: { [アイテムID]: 所持数 } }`)の7つ。
+- 以前のセーブ(キャラID単位の`characters`)は、読み込み時に自チームでその選手を使っている所持選手の分として引き継ぐ(自チームにいない選手の分は捨てる)。
+- ガチャで獲得した所持選手のIDは、全プレイヤーの`player_characters`の最大ID+1から採番する(`loadOwnedCharacters()`の`maxPlayerCharacterId`。以前は自分の行だけで数えていたため、相手プレイヤーの行とIDが重なっていた)。
 - `json`ソースでは、静的ファイルには書き込めないためセーブをブラウザの`localStorage`(キー`volleyball.progress.v1`)に保存する。そのブラウザ・端末の中だけに残り、別の端末とは共有されない。DBソースに切り替えればサーバー側に保存される。
 
 ### ガチャ(`#/gacha`、`js/screens/gacha.js`)
@@ -136,7 +138,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - メニューの「ショップ > アイテム」から開く。ショップ商品マスタ(`shop_items`)の商品を順に並べ、アイテム名・種別・個数・値段・所持数と「購入」ボタンを表示。今は無料(`currency_type`=`free`)の商品だけ買え、有料の商品はボタンを押せない。無料の商品はオレンジで目立たせる。
 - 購入(`VolleyballData.buyShopItem(商品ID)`)で、商品の`quantity`個を所持アイテムに足す。所持数は「初期の所持アイテム(`player_items`)＋変化分」で、`json`ソースではセーブ(`localStorage`の`items`、アイテムIDごとの所持数)に入る。コインは`players`の列で持つため、コインの商品はまだ買えない。
 - 経験値チケットLv1(`i_exp_ticket_1`、種別`exp_ticket`、`effect_value`=15):商品`s_exp_ticket_1`(1枚・無料)で手に入る。「チーム > 選手育成」で選手を選ぶと、所持している経験値チケットと「使う」ボタンが出る。1枚使うごとにその選手が経験値15を得る(`VolleyballData.useExpTicket(キャラID, アイテムID)`)。レベルアップの扱いはフリー練習と同じ(育成ポイント+3、トースト「LEVEL UP!」)。最大Lvの選手には使えない。チケットを持っていない時はショップへの案内を出す。
-- 今使えるのは選手育成に出る自チームの6人だけ(レベル・育成は選手ID単位でセーブしているため)。
+- 所持選手なら誰にでも使える(控え・ガチャで獲得した選手も)。
 
 ### DB用のデータ構造(`schema/`)
 - プレイヤー・選手・アイテム・ショップ・所持アイテム・所持選手・スタメン・ガチャの10テーブルを、`schema.json`(JSON Schema)・`types.ts`(TypeScript)・`create_tables.sql`(PostgreSQL)の3形式で同じ内容に定義。列名はsnake_caseで統一し、JSONとDBで名前を変換せずに使える。
@@ -208,7 +210,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 ### 選手一覧画面(`#/roster`)
 - 所持選手(`player_characters`の初期の所持選手＋ガチャで獲得した選手)をカードで表示(背番号・レア度・名前・ふりがな・ポジション・役割・身長・レベルと経験値バー・10ステータスのバー)。データは`VolleyballData.getOwnedCharacters()`。
 - 並び順:スタメン(自チームのデッキで試合に出る6人。試合の立ち位置順、背番号・役割付き) → 控え(レア度の高い順 → 獲得順)。控えはカード上の線を暗くし、背番号は「-」。デッキに入っていても試合で使わない枠(MB2)は控え扱い。
-- スタメンのレベル・経験値・育成ポイント・ステータスは、試合と育成の結果(選手ID単位のセーブ)を反映する。控えは`player_characters`の行の値をそのまま出す(育成ポイントは表示しない)。
+- レベル・経験値・育成ポイント・ステータスは所持選手1体ごとの値(試合・経験値チケット・育成の結果を反映)。
 - 75以上のステータスはオレンジで強調、育成で上げた分は数値の右上に「+n」。縦長1列、横長2列。
 
 ## コート仕様(`court.js`)
@@ -297,11 +299,10 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - 縦画面では、サーブ後にセッターが入る後衛ライトの位置が「レシーブ」ボタンの裏に重なって見えにくい(カメラ位置とボタン配置の問題)。
 - データは新しい形(`data/*.json`)になったが、ゲームはまだ一部しか使っていない。`json-source.js`が試合用の形に変換して渡している。
   - 選手のステータスは常にLv1の値(`min_*`)が基準で、レベルが上がっても`max_*`に向かって伸びない(伸びるのは育成ポイントの割り振り分だけ)。`spike`・`stamina`は試合に反映されていない。
-  - レベル・経験値・育成は選手ID単位のセーブ(`localStorage`)で、所持選手(`player_characters`)単位ではない。同じ選手を2体持っても区別されない。
   - 育成ポイント(セーブの`points`/`bonus`)を入れる列は`player_characters`にない(割り振った結果は各ステータスの現在値に入る想定)。
-  - 選手一覧・選手育成の画面に出るのはマイチームの6人だけで、所持選手やマスタの全選手の一覧はまだ無い。
+  - スタメン(デッキ)を変える画面はまだ無いので、試合に出るのは`party_deck_members`の初期の6人のまま。控えの選手は経験値チケットでしか育たない。
   - 有料のガチャ(ダイヤ・コイン・チケット)は一覧に出るが引けない(ボタンが押せず「準備中」と表示)。通貨・アイテムの所持数の管理がまだ無い。
-  - ガチャで獲得した選手は`json`ソースではブラウザの`localStorage`にだけ保存され、`data/player_characters.json`には書き込まれない。獲得した選手を見る画面(所持選手一覧)はまだ無く、試合やスタメンにも使えない。
+  - ガチャで獲得した選手は`json`ソースではブラウザの`localStorage`にだけ保存され、`data/player_characters.json`には書き込まれない。選手一覧・選手育成には出るが、スタメンにはまだ入れられない。
   - 抽選はブラウザ側で行っている。DBに移す時は不正防止のため、抽選と所持選手の登録をサーバー側に移すこと。
 
 ## 今後の拡張候補(未実装)
@@ -316,6 +317,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 実装・修正を行うたびに、新しい日付のものを上に追記していく。
 
 ### 2026-10-06
+- レベル・経験値・育成ポイント・割り振りを、選手ID単位から所持選手1体(`player_character_id`)単位のセーブに変更。同じ選手を2体持っても別々に育ち、控えやガチャで獲得した選手にも経験値チケットを使えるようになった。選手育成(`#/training`)の一覧を所持選手全員(スタメンが先頭、控えはレア度順)にし、URLを`#/training/<所持選手ID>`に変更(以前のキャラIDのURLは一覧に戻る)。選手の基本ステータスはマスタのLv1の値ではなく所持選手の行の現在値を使う(試合の自チームも)。以前のセーブは自チームの選手の分として引き継ぐ。ガチャで獲得した選手のIDが相手プレイヤーの所持選手のIDと重なっていたのを修正。データ窓口の`getCharacters`/`getCharacter`を廃止して`getOwnedCharacter`を追加、`addExp`/`allocatePoints`/`useExpTicket`は所持選手IDで受け取る。ヘッドレスChromeで、控えの桐生(ID12)にチケット7枚でLv2・スタメンの桐生(ID2)はLv1のまま、以前のセーブ(c002がLv5)がID2に引き継がれる、ガチャの新しい行がID20になる、フリー練習のラリーでスタメン6人だけに経験値(+20/+5)が入ることを確認。
 - アイテム「経験値チケットLv1」(使うと経験値15)を追加し、ショップに無料で並べた。メニューの「ショップ > アイテム」を開けるようにし(`#/shop`、`js/screens/shop.js`、`css/shop.css`)、商品の一覧と購入(今は無料の商品だけ)を作った。「選手育成」の割り振り画面に経験値チケットの「使う」ボタンを追加。`items`テーブルに`item_type`=`exp_ticket`と`effect_value`列(効果量)を追加(`schema/`の3ファイルと`data/items.json`)。データ窓口に`getItems`/`getShopItems`/`buyShopItem`/`useExpTicket`、ソースに`loadItems()`を追加。ヘッドレスChromeで、メニューからショップを開いて8枚購入 → 選手育成で7枚使うとLv1→Lv2(残り経験値5・育成ポイント+3) → 8枚目で所持0の案内に変わる → リロード後もレベルと所持数が残ることを確認。
 - 選手一覧(`#/roster`)に、自チームの6人だけでなく所持選手全員(初期の12人＋ガチャで獲得した選手)を表示するようにした。スタメンを先頭に、控えはレア度順。ステータスは全10項目。`VolleyballData.getOwnedCharacters()`を追加し、チームのメンバーに所持選手ID(`playerCharacterId`)を持たせた。レア度の星はガチャ画面と共通(`VolleyballUI.starsHtml`)。ヘッドレスChromeで、初期12人の表示とガチャ10連後に22人になることを確認。
 - メインのページ`main.html`を`index.html`に改名(`http://localhost:8000/`で開ける)。`main.html`は`index.html`への転送のみにし、`court.html`の転送先も`index.html#/practice`に変更。

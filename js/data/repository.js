@@ -4,10 +4,11 @@
  * データが JSON ファイルにあるか DB にあるかを意識しない。
  *
  * データは2種類:
- *   - マスタ(初期値): キャラクターの基本ステータスとチーム編成。ゲーム側からは書き換えない。
- *   - セーブ(進行状況): キャラクターごとのレベル・経験値・育成ポイント・割り振ったステータスと、
+ *   - マスタ(初期値): キャラクターの基本ステータス、チーム編成、初期の所持選手・所持アイテム。ゲーム側からは書き換えない。
+ *   - セーブ(進行状況): 所持選手1体(player_character_id)ごとのレベル・経験値・育成ポイント・割り振ったステータスと、
  *     ガチャで獲得した所持選手(player_characters テーブルと同じ形の行)、ショップで買った・使ったアイテムの所持数。
- *   画面に渡すキャラクターは、マスタの基本ステータスにセーブの割り振り分を足したもの。
+ *   画面に渡す選手は、所持選手の行のステータスにセーブの割り振り分を足したもの。
+ *   同じ選手を2体持っていても、レベル・育成は1体ずつ別に持つ。
  *
  * 保存先の切り替え:
  *   実際の読み書きは「ソース」が担当する。ソースは registerSource() で名前付きで登録し、
@@ -23,13 +24,15 @@
  *                               playerCharacterId はその枠の所持選手(player_characters)の ID
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
- *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行> }  初期の所持選手
+ *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行>, maxPlayerCharacterId? }
+ *                               初期の所持選手。maxPlayerCharacterId は全プレイヤーの行の最大ID(新しい行の採番用)
  *   loadItems()             → { items: Array<{ id, type, name, effectValue|null }>,
  *                               shopItems: Array<{ id, itemId, quantity, currencyType, currencyItemId|null, price }>,
  *                               owned: Array<{ itemId, quantity }> }   owned は初期の所持アイテム
- *   loadProgress()          → { characters: { [id]: { level, exp, points, bonus: { [stat]: n } } },
+ *   loadProgress()          → { owned: { [player_character_id]: { level, exp, points, bonus: { [stat]: n } } },
  *                               ownedCharacters?: Array<player_characters の行>,
  *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ
+ *                               (以前のセーブの characters: { [キャラID]: ... } は、自チームのその選手の分として読み替える)
  *   saveProgress(progress)  → 保存完了で resolve
  *   保存先の形(data/*.json や DB のテーブル)からこの形への変換はソースが行う(例: js/data/json-source.js)。
  *   欠けた値や範囲外の値はここで補正するので、ソース側は保存されている値をそのまま返せばよい。
@@ -142,72 +145,127 @@
     });
   }
 
-  // セーブデータ上のキャラクターの進行状況(無ければマスタの初期レベルから作る)。
-  function progressOf(data, id) {
-    const master = data.master.get(id);
-    let p = data.progress.characters[id];
+  // 操作中のプレイヤーの所持選手の行(初期の所持選手 + ガチャで獲得した選手)。
+  function ownedRows(d) {
+    return d.initialOwned.concat(d.progress.ownedCharacters).filter(r => r.player_id === d.playerId);
+  }
+
+  function ownedRow(d, playerCharacterId) {
+    const id = Number(playerCharacterId);
+    return ownedRows(d).find(r => r.player_character_id === id) || null;
+  }
+
+  // 所持選手1体の進行状況(無ければ行のレベル・経験値から作る)。
+  function progressOf(d, row) {
+    let p = d.progress.owned[row.player_character_id];
     if (!p) {
-      p = { level: master.level, exp: 0, points: 0, bonus: {} };
-      data.progress.characters[id] = p;
+      p = { level: row.level, exp: row.exp, points: 0, bonus: {} };
+      d.progress.owned[row.player_character_id] = p;
     }
     return p;
   }
 
-  // 画面に渡すキャラクター(マスタ + セーブの合成)。
-  function buildCharacter(data, id) {
-    const m = data.master.get(id);
-    const p = progressOf(data, id);
+  // 自チーム('player')での立ち位置と背番号。入っていなければ null。
+  function teamOf(d, playerCharacterId) {
+    const team = d.teams.find(t => String(t.id) === 'player');
+    const m = team && (team.members || []).find(x => Number(x.playerCharacterId) === playerCharacterId);
+    return m ? Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null }) : null;
+  }
+
+  // 画面・試合に渡す選手。所持選手は行のステータス + セーブの割り振り分、
+  // 所持していない選手(相手チーム)はマスタの Lv1 の値で作る。
+  //   stats/baseStats/bonus は試合用の8項目(STATS)、allStats は全10項目(ALL_STATS)。
+  function buildUnit(d, row, master, team) {
+    const p = row ? progressOf(d, row) : { level: master.level, exp: 0, points: 0, bonus: {} };
+    const baseStats = {};
     const bonus = {};
     const stats = {};
+    const allStats = {};
+    ALL_STATS.forEach(s => {
+      const base = row ? clampStat(row[s.key]) : master.minStats[s.key];
+      allStats[s.key] = Math.min(STAT_MAX, base + (p.bonus[s.key] || 0));
+    });
     STATS.forEach(s => {
+      baseStats[s.key] = row ? clampStat(row[s.key]) : master.stats[s.key];
       bonus[s.key] = p.bonus[s.key] || 0;
-      stats[s.key] = Math.min(STAT_MAX, m.stats[s.key] + bonus[s.key]);
+      stats[s.key] = Math.min(STAT_MAX, baseStats[s.key] + bonus[s.key]);
     });
     return Object.freeze({
-      id: m.id,
-      name: m.name,
-      kana: m.kana,
-      position: m.position,
-      number: m.number,
-      height: m.height,
+      playerCharacterId: row ? row.player_character_id : null,
+      id: master.id,
+      name: master.name,
+      kana: master.kana,
+      romaji: master.romaji,
+      rarity: master.rarity,
+      position: master.position,
+      height: master.height,
+      number: team && team.number != null ? team.number : null,
+      team: team || null,
       level: p.level,
       exp: p.exp,
       expToNext: VolleyballProgression.expToNext(p.level),
       points: p.points,
-      baseStats: m.stats,
+      baseStats: Object.freeze(baseStats),
       bonus: Object.freeze(bonus),
-      stats: Object.freeze(stats)
+      stats: Object.freeze(stats),
+      allStats: Object.freeze(allStats)
     });
   }
 
-  // セーブデータの読み込み時補正(壊れた値・マスタに無いキャラは無視する)。
-  function normalizeProgress(raw, master, itemMaster) {
-    const out = { characters: {} };
-    const chars = (raw && raw.characters) || {};
-    Object.keys(chars).forEach(id => {
-      if (!master.has(id)) return;
-      const c = chars[id] || {};
-      const bonus = {};
-      STATS.forEach(s => {
-        const v = Math.round(Number(c.bonus && c.bonus[s.key]) || 0);
-        if (v > 0) bonus[s.key] = Math.min(v, STAT_MAX - master.get(id).stats[s.key]);
-      });
-      out.characters[id] = {
-        level: Math.max(1, Math.min(VolleyballProgression.MAX_LEVEL, Math.round(Number(c.level) || 1))),
-        exp: Math.max(0, Math.round(Number(c.exp) || 0)),
-        points: Math.max(0, Math.round(Number(c.points) || 0)),
-        bonus: bonus
-      };
+  function buildOwned(d, row) {
+    return buildUnit(d, row, d.master.get(row.character_id), teamOf(d, row.player_character_id));
+  }
+
+  // セーブの進行状況1件の補正。割り振り分は行のステータスと合わせて99を超えないようにする。
+  function normalizeUnitProgress(c, row) {
+    c = c || {};
+    const bonus = {};
+    STATS.forEach(s => {
+      const v = Math.round(Number(c.bonus && c.bonus[s.key]) || 0);
+      if (v > 0) bonus[s.key] = Math.min(v, Math.max(0, STAT_MAX - clampStat(row[s.key])));
     });
+    return {
+      level: Math.max(1, Math.min(VolleyballProgression.MAX_LEVEL, Math.round(Number(c.level) || 1))),
+      exp: Math.max(0, Math.round(Number(c.exp) || 0)),
+      points: Math.max(0, Math.round(Number(c.points) || 0)),
+      bonus: bonus
+    };
+  }
+
+  // セーブデータの読み込み時補正(壊れた値・マスタや所持選手に無いものは無視する)。
+  function normalizeProgress(raw, ctx) {
+    const out = {};
     // ガチャで獲得した所持選手(壊れた行・マスタに無い選手は捨てる)
     out.ownedCharacters = ((raw && raw.ownedCharacters) || [])
-      .map(row => normalizeOwnedRow(row, master))
+      .map(row => normalizeOwnedRow(row, ctx.master))
       .filter(Boolean);
+    const rows = new Map();
+    ctx.initialOwned.concat(out.ownedCharacters)
+      .filter(r => r.player_id === ctx.playerId)
+      .forEach(r => rows.set(r.player_character_id, r));
+
+    out.owned = {};
+    const owned = (raw && raw.owned) || {};
+    Object.keys(owned).forEach(id => {
+      const row = rows.get(Number(id));
+      if (row) out.owned[row.player_character_id] = normalizeUnitProgress(owned[id], row);
+    });
+    // 以前のセーブ(キャラID単位)は、自チームでその選手を使っている所持選手の分として引き継ぐ
+    const legacy = (raw && raw.characters) || {};
+    const team = ctx.teams.find(t => String(t.id) === 'player');
+    Object.keys(legacy).forEach(charId => {
+      const m = team && (team.members || []).find(x => String(x.characterId) === charId);
+      const row = m && rows.get(Number(m.playerCharacterId));
+      if (row && !out.owned[row.player_character_id]) {
+        out.owned[row.player_character_id] = normalizeUnitProgress(legacy[charId], row);
+      }
+    });
+
     // ショップで買った・使ったアイテムの所持数(アイテムマスタに無いものは捨てる)
     out.items = {};
     const items = (raw && raw.items) || {};
     Object.keys(items).forEach(id => {
-      if (itemMaster.has(id)) out.items[id] = Math.max(0, Math.round(Number(items[id]) || 0));
+      if (ctx.itemMaster.has(id)) out.items[id] = Math.max(0, Math.round(Number(items[id]) || 0));
     });
     return out;
   }
@@ -311,18 +369,24 @@
             }
           }));
           const items = normalizeItems(rawItems);
+          // 初期の所持選手(マスタ側。ゲームからは書き換えない)。獲得分は progress.ownedCharacters
+          const initialOwned = (rawOwned.characters || []).map(row => normalizeOwnedRow(row, master)).filter(Boolean);
+          const playerId = rawOwned.playerId;
           return {
             master: master,
             teams: rawTeams,
-            progress: normalizeProgress(rawProgress, master, items.master),
+            progress: normalizeProgress(rawProgress, {
+              master: master, itemMaster: items.master, initialOwned: initialOwned, playerId: playerId, teams: rawTeams
+            }),
             itemMaster: items.master,
             shopItems: items.shopItems,
             // 初期の所持アイテム { [itemId]: 所持数 }(マスタ側。変わった分は progress.items)
             initialItems: items.owned,
             gachas: rawGachas.map(g => normalizeGacha(g, master)),
-            playerId: rawOwned.playerId,
-            // 初期の所持選手(マスタ側。ゲームからは書き換えない)。獲得分は progress.ownedCharacters
-            initialOwned: (rawOwned.characters || []).map(row => normalizeOwnedRow(row, master)).filter(Boolean)
+            playerId: playerId,
+            initialOwned: initialOwned,
+            // 新しい所持選手の採番用(他のプレイヤーの行とIDが重ならないように)
+            maxPlayerCharacterId: Math.max(0, Math.round(Number(rawOwned.maxPlayerCharacterId)) || 0)
           };
         });
       cache.catch(() => { cache = null; }); // 失敗したら次回やり直せるように
@@ -337,76 +401,80 @@
     return saveQueue;
   }
 
-  function getCharacters() {
-    return load().then(d => Array.from(d.master.keys()).map(id => buildCharacter(d, id)));
-  }
-
-  function getCharacter(id) {
-    return load().then(d => (d.master.has(String(id)) ? buildCharacter(d, String(id)) : null));
-  }
-
+  /**
+   * チーム。members の character は buildUnit() の形。
+   * 自チーム('player')の選手は所持選手(レベル・育成を反映)、相手チームはマスタの値。
+   */
   function getTeam(id) {
     return load().then(d => {
       const raw = d.teams.find(t => String(t.id) === String(id));
       if (!raw) throw new Error('チーム "' + id + '" が見つかりません');
+      const isPlayer = String(raw.id) === 'player';
       return Object.freeze({
         id: String(raw.id),
         name: raw.name || raw.id,
-        members: Object.freeze((raw.members || []).map(m => Object.freeze({
-          slot: m.slot,
-          character: buildCharacter(d, String(m.characterId))
-        })))
+        members: Object.freeze((raw.members || []).map(m => {
+          const row = isPlayer ? ownedRow(d, m.playerCharacterId) : null;
+          if (isPlayer && !row) throw new Error('チーム "' + raw.id + '" の ' + m.slot + ' の所持選手が見つかりません');
+          const team = Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null });
+          return Object.freeze({
+            slot: m.slot,
+            character: buildUnit(d, row, d.master.get(String(m.characterId)), team)
+          });
+        }))
       });
     });
   }
 
+  function requireOwned(d, playerCharacterId) {
+    const row = ownedRow(d, playerCharacterId);
+    if (!row) throw new Error('所持選手 "' + playerCharacterId + '" が見つかりません');
+    return row;
+  }
+
   /**
    * 経験値を与える。レベルが上がれば育成ポイントも増える。
-   * @param {string[]} ids - キャラクターID
+   * @param {number[]} playerCharacterIds - 所持選手ID(所持していないIDは無視する)
    * @param {number} amount
    * @returns {Promise<Array<{character, levelsGained:number, pointsGained:number}>>}
    */
-  function addExp(ids, amount) {
+  function addExp(playerCharacterIds, amount) {
     return load().then(d => {
-      const results = grantExp(d, ids, amount);
+      const rows = playerCharacterIds.map(id => ownedRow(d, id)).filter(Boolean);
+      const results = rows.map(row => grantExp(d, row, amount));
       return save(d).then(() => results.map(r => expResult(d, r)));
     });
   }
 
   // セーブ上の経験値を増やす(保存はしない)。
-  function grantExp(d, ids, amount) {
-    return ids.filter(id => d.master.has(String(id))).map(id => {
-      id = String(id);
-      const p = progressOf(d, id);
-      const r = VolleyballProgression.addExp(p, amount);
-      p.level = r.level;
-      p.exp = r.exp;
-      p.points = r.points;
-      return { id: id, levelsGained: r.levelsGained, pointsGained: r.pointsGained };
-    });
+  function grantExp(d, row, amount) {
+    const p = progressOf(d, row);
+    const r = VolleyballProgression.addExp(p, amount);
+    p.level = r.level;
+    p.exp = r.exp;
+    p.points = r.points;
+    return { row: row, levelsGained: r.levelsGained, pointsGained: r.pointsGained };
   }
 
   function expResult(d, r) {
-    return { character: buildCharacter(d, r.id), levelsGained: r.levelsGained, pointsGained: r.pointsGained };
+    return { character: buildOwned(d, r.row), levelsGained: r.levelsGained, pointsGained: r.pointsGained };
   }
 
   /**
    * 育成ポイントをステータスに割り振る。
-   * @param {string} id - キャラクターID
+   * @param {number} playerCharacterId - 所持選手ID
    * @param {Object<string, number>} allocation - 例 { speed: 2, receive: 1 }(上げる量)
-   * @returns {Promise<character>} 割り振り後のキャラクター
+   * @returns {Promise<character>} 割り振り後の選手
    */
-  function allocatePoints(id, allocation) {
+  function allocatePoints(playerCharacterId, allocation) {
     return load().then(d => {
-      id = String(id);
-      if (!d.master.has(id)) throw new Error('キャラクター "' + id + '" が見つかりません');
-      const p = progressOf(d, id);
-      const base = d.master.get(id).stats;
+      const row = requireOwned(d, playerCharacterId);
+      const p = progressOf(d, row);
       let total = 0;
       STATS.forEach(s => {
         const add = Math.round(Number(allocation[s.key]) || 0);
         if (add < 0) throw new Error('ステータスを下げることはできません');
-        if (base[s.key] + (p.bonus[s.key] || 0) + add > STAT_MAX) {
+        if (clampStat(row[s.key]) + (p.bonus[s.key] || 0) + add > STAT_MAX) {
           throw new Error(s.label + 'は' + STAT_MAX + 'より上げられません');
         }
         total += add;
@@ -417,7 +485,7 @@
         if (add > 0) p.bonus[s.key] = (p.bonus[s.key] || 0) + add;
       });
       p.points -= total;
-      return save(d).then(() => buildCharacter(d, id));
+      return save(d).then(() => buildOwned(d, row));
     });
   }
 
@@ -520,8 +588,8 @@
       if (!g.rates.some(r => r.probability > 0)) throw new Error('このガチャには排出される選手がいません');
 
       const owned = d.initialOwned.concat(d.progress.ownedCharacters);
-      const ownedIds = new Set(owned.map(r => r.character_id));
-      let nextId = owned.reduce((max, r) => Math.max(max, r.player_character_id), 0) + 1;
+      const ownedIds = new Set(owned.filter(r => r.player_id === d.playerId).map(r => r.character_id));
+      let nextId = owned.reduce((max, r) => Math.max(max, r.player_character_id), d.maxPlayerCharacterId) + 1;
       const results = [];
       for (let i = 0; i < count; i++) {
         const m = d.master.get(pickRate(g.rates.filter(r => r.probability > 0)).characterId);
@@ -615,23 +683,22 @@
 
   /**
    * 経験値チケットを使って、選手に経験値を与える。
-   * @param {string} characterId - キャラクターID
+   * @param {number} playerCharacterId - 所持選手ID
    * @param {string} itemId - 経験値チケットのアイテムID
    * @param {number} [count=1] - 使う枚数
    * @returns {Promise<{ character, levelsGained, pointsGained, exp, item }>} exp は得た経験値の合計
    */
-  function useExpTicket(characterId, itemId, count) {
+  function useExpTicket(playerCharacterId, itemId, count) {
     count = count == null ? 1 : Math.round(Number(count));
     return load().then(d => {
-      const id = String(characterId);
+      const row = requireOwned(d, playerCharacterId);
       const item = d.itemMaster.get(String(itemId));
-      if (!d.master.has(id)) throw new Error('キャラクター "' + id + '" が見つかりません');
       if (!item || item.type !== 'exp_ticket') throw new Error('経験値チケットではありません');
       if (!(count >= 1)) throw new Error('使う枚数が正しくありません');
       if (itemCount(d, item.id) < count) throw new Error(item.name + 'が足りません');
-      if (progressOf(d, id).level >= VolleyballProgression.MAX_LEVEL) throw new Error('これ以上レベルを上げられません');
+      if (progressOf(d, row).level >= VolleyballProgression.MAX_LEVEL) throw new Error('これ以上レベルを上げられません');
       d.progress.items[item.id] = itemCount(d, item.id) - count;
-      const r = grantExp(d, [id], item.effectValue * count)[0];
+      const r = grantExp(d, row, item.effectValue * count);
       return save(d).then(() => Object.assign(expResult(d, r), {
         exp: item.effectValue * count,
         item: buildItem(d, item)
@@ -643,43 +710,20 @@
 
   /**
    * 操作中のプレイヤーの所持選手(初期の所持選手 + ガチャで獲得した選手)。player_character_id の順。
-   * 自チーム('player')のデッキに入っている選手は、試合で上げたレベル・経験値・育成ポイントと
-   * 割り振ったステータスを反映する(レベル・育成はまだ選手ID単位でセーブしているため)。
-   * @returns {Promise<Array<{ playerCharacterId, level, exp, expToNext, points|null,
-   *   stats: { [ALL_STATS のキー]: n }, bonus: { [stat]: n }, character, team: { slot, number }|null }>>}
+   * 形は buildUnit()(team は自チームのデッキでの立ち位置と背番号。入っていなければ null)。
    */
   function getOwnedCharacters() {
+    return load().then(d => ownedRows(d)
+      .slice()
+      .sort((a, b) => a.player_character_id - b.player_character_id)
+      .map(row => buildOwned(d, row)));
+  }
+
+  /** 所持選手1体。無ければ null。 */
+  function getOwnedCharacter(playerCharacterId) {
     return load().then(d => {
-      const team = d.teams.find(t => String(t.id) === 'player');
-      const inTeam = new Map();
-      (team ? team.members : []).forEach(m => {
-        if (m.playerCharacterId != null) inTeam.set(Number(m.playerCharacterId), m);
-      });
-      return d.initialOwned.concat(d.progress.ownedCharacters)
-        .filter(row => row.player_id === d.playerId)
-        .sort((a, b) => a.player_character_id - b.player_character_id)
-        .map(row => {
-          const m = inTeam.get(row.player_character_id);
-          const p = m ? progressOf(d, row.character_id) : null;
-          const stats = {};
-          const bonus = {};
-          ALL_STATS.forEach(s => {
-            bonus[s.key] = (p && p.bonus[s.key]) || 0;
-            stats[s.key] = Math.min(STAT_MAX, row[s.key] + bonus[s.key]);
-          });
-          const level = p ? p.level : row.level;
-          return Object.freeze({
-            playerCharacterId: row.player_character_id,
-            level: level,
-            exp: p ? p.exp : row.exp,
-            expToNext: VolleyballProgression.expToNext(level),
-            points: p ? p.points : null,
-            stats: Object.freeze(stats),
-            bonus: Object.freeze(bonus),
-            character: profileOf(d.master.get(row.character_id)),
-            team: m ? Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null }) : null
-          });
-        });
+      const row = ownedRow(d, playerCharacterId);
+      return row ? buildOwned(d, row) : null;
     });
   }
 
@@ -697,8 +741,6 @@
     GACHA_COUNTS: GACHA_COUNTS,
     registerSource: registerSource,
     configure: configure,
-    getCharacters: getCharacters,
-    getCharacter: getCharacter,
     getTeam: getTeam,
     addExp: addExp,
     allocatePoints: allocatePoints,
@@ -706,6 +748,7 @@
     getGacha: getGacha,
     drawGacha: drawGacha,
     getOwnedCharacters: getOwnedCharacters,
+    getOwnedCharacter: getOwnedCharacter,
     getItems: getItems,
     getShopItems: getShopItems,
     buyShopItem: buyShopItem,
