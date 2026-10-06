@@ -1,6 +1,6 @@
 /**
  * VolleyballApp
- * main.html の画面マネージャ。各画面(js/screens/*.js)は register() で自分を登録し、
+ * index.html の画面マネージャ。各画面(js/screens/*.js)は register() で自分を登録し、
  * ここが URL ハッシュに応じて1画面だけを生成(mount)・破棄(unmount)する。
  *
  * URL ハッシュの形: #/<画面名>/<引数1>/<引数2>...   例) #/title, #/menu/team, #/practice

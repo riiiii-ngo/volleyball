@@ -11,7 +11,7 @@
  *
  * 保存先の切り替え:
  *   実際の読み書きは「ソース」が担当する。ソースは registerSource() で名前付きで登録し、
- *   configure({ source: '<名前>', ...オプション }) で使うものを選ぶ(main.html で1回だけ呼ぶ)。
+ *   configure({ source: '<名前>', ...オプション }) で使うものを選ぶ(index.html で1回だけ呼ぶ)。
  *     - 'json' : マスタは data/*.json、セーブはブラウザの localStorage(js/data/json-source.js)。
  *     - 将来 DB に移す時は、ブラウザから DB へは直接つながないので、サーバーの API を叩く
  *       ソース(例: 'api')を js/data/ に作って登録し、configure の source を差し替えるだけでよい。

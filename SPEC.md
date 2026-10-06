@@ -5,9 +5,9 @@
 ## ファイル構成
 
 ```
-main.html            唯一のページ。画面の入れ物・CSS/スクリプト読み込み・エラーバナーのみ
-index.html           main.html への転送のみ(旧URL互換)
-court.html           main.html#/practice への転送のみ(旧URL互換)
+index.html           唯一のページ。画面の入れ物・CSS/スクリプト読み込み・エラーバナーのみ
+main.html            index.html への転送のみ(旧URL互換)
+court.html           index.html#/practice への転送のみ(旧URL互換)
 css/base.css         全画面共通(色・フォントのトークン、トースト、エラーバナー)
 css/menu.css         タイトル/メニュー画面
 css/court.css        フリー練習(コート)画面のボタン・ジョイスティック
@@ -47,9 +47,9 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 
 将来的にチーム編成機能やオンライン対戦を実装する際は、`simulation.js`に渡す`config`(選手の位置・能力値)を差し替える、または`simulation`が持つ状態をネットワーク越しに同期する、という拡張を想定している。
 
-## 画面構成(`main.html` / `js/app.js` / `js/screens/`)
+## 画面構成(`index.html` / `js/app.js` / `js/screens/`)
 
-`main.html`が唯一のページで、`VolleyballApp`(`js/app.js`)がURLハッシュに応じて`js/screens/`の画面を1つだけ生成(mount)・破棄(unmount)する。
+`index.html`が唯一のページで、`VolleyballApp`(`js/app.js`)がURLハッシュに応じて`js/screens/`の画面を1つだけ生成(mount)・破棄(unmount)する。
 
 | ハッシュ | 画面 | ファイル |
 |---|---|---|
@@ -67,7 +67,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 メニュー --(ショップ > ガチャ)--> ガチャ一覧 --(ガチャを選ぶ)--> 引く画面 --(1回/10回引く)--> 結果 --(次へ)--> 引く画面
 ```
 
-- 画面の追加方法：`js/screens/<名前>.js`で`VolleyballApp.register('<名前>', { mount(el, args, app) {...} })`を書き、`main.html`で読み込む。メニュー項目から開くなら`MENU_TABS`の項目に`screen: '<名前>'`を付ける。
+- 画面の追加方法：`js/screens/<名前>.js`で`VolleyballApp.register('<名前>', { mount(el, args, app) {...} })`を書き、`index.html`で読み込む。メニュー項目から開くなら`MENU_TABS`の項目に`screen: '<名前>'`を付ける。
 - `mount`は画面用の要素`el`・ハッシュの引数`args`・`app`(`go`/`toast`/`loadScripts`)を受け取り、`{ update(args), unmount() }`を返せる。同じ画面のまま引数だけ変わる時(メニューのタブ切り替え)は`update`が呼ばれ、画面を離れる時は`unmount`のあと要素ごと取り除かれる。
 - メニューのタブ切り替えは履歴を積まない(`go(..., { replace: true })`)ので、ブラウザの戻るでタブを遡らない。
 - フリー練習画面は three.js とゲーム本体(`court.js`〜`game.js`)を初めて入った時だけ読み込む(タイトル/メニューを軽くするため。2回目以降は再利用)。離れる時は`VolleyballGame`の`destroy()`で描画ループ停止・WebGL/ジオメトリ/テクスチャ解放・ジョイスティック撤去を行う。読み込み中に離れた場合は起動しない。
@@ -118,7 +118,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 ### 保存先の切り替え(JSON → DB)
 - データは「マスタ」(キャラクターの初期値・チーム編成。ゲームからは書き換えない)と「セーブ」(キャラクターごとのレベル・経験値・育成ポイント・割り振ったステータス)の2種類。画面に渡すキャラクターは、マスタの基本ステータスにセーブの割り振り分を足したもの(`stats`)で、`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`も持つ。
 - ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getCharacters()`/`getCharacter(id)`/`getTeam(id)`/`reload()`。書き込み:`addExp(ids, amount)`(レベルアップ結果を返す)/`allocatePoints(id, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)。保存先の違いは「ソース」が吸収する。
-- 使うソースは`main.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
+- 使うソースは`index.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
 - DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ characters: { [id]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行] }`)の6つ。
 - `json`ソースでは、静的ファイルには書き込めないためセーブをブラウザの`localStorage`(キー`volleyball.progress.v1`)に保存する。そのブラウザ・端末の中だけに残り、別の端末とは共有されない。DBソースに切り替えればサーバー側に保存される。
 
@@ -143,7 +143,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - DBでは保証できず、アプリ側で検証すること:1つのガチャの排出確率の合計が100になる/デッキに置く選手がそのプレイヤーの所持選手である/1つのデッキで同じ所持選手・同じ背番号を2つの枠に使わない。
 
 ### ローカルでの起動
-- データをfetchで読むため、`file://`で直接開くとデータが読めない(ブラウザの制限)。プロジェクト直下で`python -m http.server`等を起動して`http://localhost:8000/main.html`で開く。`file://`で開いた場合は選手一覧・フリー練習にその旨のメッセージを表示する(タイトル/メニューは動く)。
+- データをfetchで読むため、`file://`で直接開くとデータが読めない(ブラウザの制限)。プロジェクト直下で`python -m http.server`等を起動して`http://localhost:8000/`で開く。`file://`で開いた場合は選手一覧・フリー練習にその旨のメッセージを表示する(タイトル/メニューは動く)。
 
 ### ステータスの試合への反映(`js/stats.js`)
 | ステータス | 試合での効果 | 換算 |
@@ -300,6 +300,9 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 ## 進捗ログ
 
 実装・修正を行うたびに、新しい日付のものを上に追記していく。
+
+### 2026-10-06
+- メインのページ`main.html`を`index.html`に改名(`http://localhost:8000/`で開ける)。`main.html`は`index.html`への転送のみにし、`court.html`の転送先も`index.html#/practice`に変更。
 
 ### 2026-10-05
 - ガチャ画面を追加(`#/gacha`、`js/screens/gacha.js`、`css/gacha.css`)。メニューの「ショップ > 選手スカウト」を「ガチャ」に変えて開けるようにした。開催中のガチャの一覧 → 引く画面(1回/10回) → 結果(選手のカード、タップで詳細、「次へ」で引く画面へ)。獲得した選手は`player_characters`と同じ形の行で所持選手に登録する(`json`ソースでは`localStorage`)。今引けるのは無料のガチャだけで、有料のガチャはボタンを押せないようにした。
