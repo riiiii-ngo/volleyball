@@ -20,9 +20,7 @@
     '</header>';
   }
 
-  function starsHtml(rarity) {
-    return '<span class="gacha-stars is-r' + rarity + '" aria-label="レア度' + rarity + '">' + '★'.repeat(rarity) + '</span>';
-  }
+  const starsHtml = VolleyballUI.starsHtml;
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function formatDate(d) {

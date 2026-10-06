@@ -53,7 +53,7 @@
       return loadJson(name + '.json').then(json => json[name] || []);
     }
 
-    // GAME_TEAMS のデッキを読み、チームごとに [{ slot, characterId, number }] を作る。
+    // GAME_TEAMS のデッキを読み、チームごとに [{ slot, characterId, playerCharacterId, number }] を作る。
     function loadGameTeams() {
       return Promise.all(['players', 'player_characters', 'party_decks', 'party_deck_members'].map(loadTable))
         .then(([players, owned, decks, members]) => GAME_TEAMS.map(t => {
@@ -68,7 +68,7 @@
               const key = t.slots[slot];
               const pc = owned.find(o => o.player_character_id === row[key + '_player_character_id']);
               if (!pc) throw new Error('チーム "' + t.id + '" のデッキの ' + key + ' に選手がいません');
-              return { slot: slot, characterId: pc.character_id, number: row[key + '_uniform_number'] };
+              return { slot: slot, characterId: pc.character_id, playerCharacterId: pc.player_character_id, number: row[key + '_uniform_number'] };
             })
           };
         }));

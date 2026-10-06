@@ -198,3 +198,8 @@
 }
 .ui-points small { font-size: 12px; margin-left: 2px; }
 .ui-points.has-points { color: var(--yellow); }
+
+/* 選手一覧:控えの選手は上の線を目立たせない */
+.roster-card:not(.is-starter) { border-top-color: var(--navy-700); }
+.roster-card:not(.is-starter) .roster-number { color: var(--navy-300); }
+.roster-kana .gacha-stars { font-size: 10px; letter-spacing: 0; }

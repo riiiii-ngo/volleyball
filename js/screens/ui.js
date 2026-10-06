@@ -25,5 +25,10 @@
     return '<span class="ui-points' + (points > 0 ? ' has-points' : '') + '">' + points + '<small>pt</small></span>';
   }
 
-  global.VolleyballUI = Object.freeze({ escapeHtml: escapeHtml, levelHtml: levelHtml, pointsHtml: pointsHtml });
+  // レア度の星(★の数と色。スタイルは css/gacha.css の .gacha-stars)
+  function starsHtml(rarity) {
+    return '<span class="gacha-stars is-r' + rarity + '" aria-label="レア度' + rarity + '">' + '★'.repeat(rarity) + '</span>';
+  }
+
+  global.VolleyballUI = Object.freeze({ escapeHtml: escapeHtml, levelHtml: levelHtml, pointsHtml: pointsHtml, starsHtml: starsHtml });
 })(window);

@@ -19,7 +19,8 @@
  * ソースが実装するメソッド(すべて Promise を返す):
  *   loadCharacters()        → Array<{ id, name, kana?, romaji?, rarity?, level?, position, number?, height?, stats,
  *                                     minStats? }>   stats は試合用8項目、minStats は ALL_STATS の Lv1 の値
- *   loadTeams()             → Array<{ id, name, members: Array<{ slot, characterId }> }>
+ *   loadTeams()             → Array<{ id, name, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
+ *                               playerCharacterId はその枠の所持選手(player_characters)の ID
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
  *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行> }  初期の所持選手
@@ -481,6 +482,50 @@
     });
   }
 
+  // ---------- 所持選手 ----------
+
+  /**
+   * 操作中のプレイヤーの所持選手(初期の所持選手 + ガチャで獲得した選手)。player_character_id の順。
+   * 自チーム('player')のデッキに入っている選手は、試合で上げたレベル・経験値・育成ポイントと
+   * 割り振ったステータスを反映する(レベル・育成はまだ選手ID単位でセーブしているため)。
+   * @returns {Promise<Array<{ playerCharacterId, level, exp, expToNext, points|null,
+   *   stats: { [ALL_STATS のキー]: n }, bonus: { [stat]: n }, character, team: { slot, number }|null }>>}
+   */
+  function getOwnedCharacters() {
+    return load().then(d => {
+      const team = d.teams.find(t => String(t.id) === 'player');
+      const inTeam = new Map();
+      (team ? team.members : []).forEach(m => {
+        if (m.playerCharacterId != null) inTeam.set(Number(m.playerCharacterId), m);
+      });
+      return d.initialOwned.concat(d.progress.ownedCharacters)
+        .filter(row => row.player_id === d.playerId)
+        .sort((a, b) => a.player_character_id - b.player_character_id)
+        .map(row => {
+          const m = inTeam.get(row.player_character_id);
+          const p = m ? progressOf(d, row.character_id) : null;
+          const stats = {};
+          const bonus = {};
+          ALL_STATS.forEach(s => {
+            bonus[s.key] = (p && p.bonus[s.key]) || 0;
+            stats[s.key] = Math.min(STAT_MAX, row[s.key] + bonus[s.key]);
+          });
+          const level = p ? p.level : row.level;
+          return Object.freeze({
+            playerCharacterId: row.player_character_id,
+            level: level,
+            exp: p ? p.exp : row.exp,
+            expToNext: VolleyballProgression.expToNext(level),
+            points: p ? p.points : null,
+            stats: Object.freeze(stats),
+            bonus: Object.freeze(bonus),
+            character: profileOf(d.master.get(row.character_id)),
+            team: m ? Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null }) : null
+          });
+        });
+    });
+  }
+
   // データを読み直す(保存先側で内容が変わった時用)。
   function reload() {
     cache = null;
@@ -503,6 +548,7 @@
     getActiveGachas: getActiveGachas,
     getGacha: getGacha,
     drawGacha: drawGacha,
+    getOwnedCharacters: getOwnedCharacters,
     reload: reload
   });
 })(window);
