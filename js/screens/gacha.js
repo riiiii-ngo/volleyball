@@ -2,7 +2,7 @@
  * ガチャ画面。
  *   #/gacha        開催中(ガチャマスタの有効期間内)のガチャ一覧
  *   #/gacha/<id>   そのガチャを引く画面(1回 / 10回)。引くと同じ画面のまま結果を表示し、
- *                  「次へ」(結果一覧とは別の、画面下部に固定した枠)で引く画面に戻る。結果の選手をタップすると詳細を重ねて表示する。
+ *                  「次へ」(見出し「ガチャ結果」の横。結果一覧とは別でスクロールしない)で引く画面に戻る。結果の選手をタップすると詳細を重ねて表示する。
  * 獲得した選手は VolleyballData.drawGacha() が所持選手(player_characters)に登録する。
  */
 (function () {
@@ -13,10 +13,14 @@
   function headerHtml(backLabel, en, ja) {
     return '<header class="menu-header">' +
       '<button type="button" class="roster-back">' + backLabel + '</button>' +
-      '<h1 class="menu-heading">' +
-        '<span class="menu-heading-en">' + en + '</span>' +
-        '<span class="menu-heading-ja">' + esc(ja) + '</span>' +
-      '</h1>' +
+      '<div class="gacha-heading-row">' +
+        '<h1 class="menu-heading">' +
+          '<span class="menu-heading-en">' + en + '</span>' +
+          '<span class="menu-heading-ja">' + esc(ja) + '</span>' +
+        '</h1>' +
+        // 見出しの横に置くボタン(ガチャ結果の「次へ」)
+        '<span class="gacha-heading-action"></span>' +
+      '</div>' +
     '</header>';
   }
 
@@ -86,15 +90,10 @@
     const headingJa = el.querySelector('.menu-heading-ja');
     let gacha = null;
     let busy = false;
-    let footer = null; // 結果画面の下部に固定する「次へ」の枠
-
-    function removeFooter() {
-      if (footer) footer.remove();
-      footer = null;
-    }
+    const headingAction = el.querySelector('.gacha-heading-action');
 
     function drawPanel() {
-      removeFooter();
+      headingAction.innerHTML = '';
       const g = gacha;
       headingEn.textContent = 'GACHA';
       headingJa.textContent = g.name;
@@ -165,16 +164,12 @@
         }).join('') + '</ul>' +
         '<p class="gacha-hint">選手をタップすると詳細を見られます。獲得した選手は所持選手に追加されました。</p>';
       content.scrollTop = 0;
-      // 「次へ」は結果一覧(スクロールする部分)の外に置き、常に画面に出す
-      removeFooter();
-      footer = document.createElement('div');
-      footer.className = 'gacha-result-footer';
-      footer.innerHTML = '<div class="gacha-next-wrap"><button type="button" class="gacha-next">次へ</button></div>';
-      el.appendChild(footer);
+      // 「次へ」は結果一覧(スクロールする部分)ではなく、見出し「ガチャ結果」の横に置いて常に画面に出す
+      headingAction.innerHTML = '<button type="button" class="gacha-next">次へ</button>';
       content.querySelectorAll('.gacha-card').forEach(btn => {
         btn.addEventListener('click', () => openDetail(el, results[Number(btn.dataset.index)].character));
       });
-      footer.querySelector('.gacha-next').addEventListener('click', drawPanel);
+      headingAction.querySelector('.gacha-next').addEventListener('click', drawPanel);
     }
 
     VolleyballData.getGacha(id).then(g => {
