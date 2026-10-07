@@ -261,33 +261,34 @@
   line-height: 1.7;
   color: var(--navy-300);
 }
-/* 見出しの行(見出し + 右側のボタン)。ボタンは結果一覧とは別でスクロールしない */
-.gacha-heading-row {
-  max-width: var(--content-max, 560px);
-  margin: 0 auto;
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
+/* 結果画面の「次へ」のレイヤー。獲得した選手の一覧(スクロールする部分)とは別に、
+   メニューのタブバーと同じく画面下部に固定して重ねる(一覧の下余白はタブバー分あるので最後のカードも隠れない) */
+.gacha-result-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9; /* 一覧より上、選手の詳細(z-index 10)より下 */
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--navy-950);
+  box-shadow: 0 -2px 0 var(--orange);
 }
-.gacha-heading-row .menu-heading { flex: 1; min-width: 0; margin: 0; }
-.gacha-heading-action { flex: none; }
-.gacha-heading-action:empty { display: none; }
+.gacha-next-wrap { max-width: var(--content-max, 560px); margin: 0 auto; }
+/* 「次へ」のレイヤーがある間は、一覧の最後が隠れないよう下に余白を取る */
+.gacha-screen.has-result-footer .roster-content { padding-bottom: calc(env(safe-area-inset-bottom) + 100px); }
 .gacha-next {
-  min-width: 112px;
-  height: 46px;
-  padding: 0 24px;
+  width: 100%;
+  height: 56px;
   border: 0;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 900;
   letter-spacing: 0.2em;
   color: #fff;
   background: var(--orange);
-  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
   cursor: pointer;
-  animation: gacha-next-in 0.3s ease 0.2s backwards;
 }
-@keyframes gacha-next-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-.gacha-next:active { transform: scale(0.96); }
+.gacha-next:active { transform: scale(0.98); }
 .gacha-next:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--yellow); }
 
 /* ---------- 選手の詳細(重ねて表示) ---------- */
@@ -355,8 +356,9 @@
   .gacha-list li, .gacha-results li, .gacha-detail { animation: none; }
 }
 
-/* 横向きのスマホ:見出しが1行になるので「次へ」も低くする */
+/* 横向きのスマホ:下部の「次へ」を薄くして結果を見やすくする */
 @media (orientation: landscape) and (max-height: 520px) {
-  .gacha-heading-row { align-items: center; }
-  .gacha-next { height: 38px; font-size: 15px; }
+  .gacha-result-footer { padding-top: 6px; padding-bottom: calc(env(safe-area-inset-bottom) + 6px); }
+  .gacha-next { height: 40px; font-size: 16px; }
+  .gacha-screen.has-result-footer .roster-content { padding-bottom: calc(env(safe-area-inset-bottom) + 68px); }
 }
