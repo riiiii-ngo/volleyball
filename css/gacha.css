@@ -261,6 +261,13 @@
   line-height: 1.7;
   color: var(--navy-300);
 }
+/* 結果画面の下部に固定する枠(結果一覧とは別。スクロールしても「次へ」が常に見える) */
+.gacha-result-footer {
+  flex: none;
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--navy-850);
+  border-top: 2px solid var(--orange);
+}
 .gacha-next-wrap { max-width: var(--content-max, 560px); margin: 0 auto; }
 .gacha-next {
   width: 100%;
@@ -339,4 +346,10 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .gacha-list li, .gacha-results li, .gacha-detail { animation: none; }
+}
+
+/* 横向きのスマホ:下部の「次へ」の枠を薄くして結果を見やすくする */
+@media (orientation: landscape) and (max-height: 520px) {
+  .gacha-result-footer { padding-top: 6px; padding-bottom: calc(env(safe-area-inset-bottom) + 6px); }
+  .gacha-next { height: 44px; font-size: 16px; }
 }
