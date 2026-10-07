@@ -331,6 +331,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 実装・修正を行うたびに、新しい日付のものを上に追記していく。
 
 ### 2026-10-07
+- スマホでダブルタップしても画面がズームしないようにした。`css/base.css`の`html, body`に`touch-action: manipulation`(子要素にも効く。iOS Safariも対象)、`index.html`のviewportに`maximum-scale=1.0, user-scalable=no`(ピンチでのズームも無効。iOS Safariはピンチについてはこの指定を無視する)。
 - 画面上部に共通ヘッダーを追加し、ユーザ名・所持ダイヤ(有償+無償)・所持コインを表示するようにした(`js/screens/header.js`、`css/header.css`)。メニュー・選手一覧・選手育成・ガチャ・ショップで表示し、タイトルとフリー練習では出さない(画面定義の`hideHeader`)。データ窓口に`VolleyballData.getPlayer()`、ソースに`loadPlayer()`(`json`ソースは`data/players.json`のプレイヤー1)を追加。`VolleyballApp.start()`に`header`を渡せるようにし、`app.refreshHeader()`を追加。ヘッドレスChromeで、メニュー(幅390px・320px)・ショップ・選手一覧・横向き(900×450)でヘッダーに「プレイヤー / 1,500 / 12,000」が出て画面と重ならないこと、タイトルとフリー練習ではヘッダーが非表示になることを確認。
 - 試合ではレベルが上がらないようにした。フリー練習のラリー終了時に自チームへ経験値(+20/+5)を与える処理を削除し、レベルを上げる方法を経験値チケット(アイテム)だけにした。使われなくなったデータ窓口の`VolleyballData.addExp`と`VolleyballProgression.EXP_RALLY_WIN`/`EXP_RALLY_LOSE`も削除。選手育成画面の説明文を「経験値チケットで経験値がたまり(試合では経験値は入りません)」に変更。
 

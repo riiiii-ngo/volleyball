@@ -30,6 +30,8 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  /* ダブルタップでのズームを無効にする(子要素にも効く。コートの操作部分は court.css で none) */
+  touch-action: manipulation;
 }
 button, a { font: inherit; color: inherit; }
 
