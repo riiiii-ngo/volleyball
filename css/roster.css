@@ -42,9 +42,10 @@
   font-weight: 900;
   font-size: 15px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
 }
+.roster-team p { flex: 1; margin: 0; display: flex; align-items: baseline; gap: 10px; }
 .roster-team span { font-size: 12px; color: var(--navy-300); }
 
 .roster-list {
@@ -203,3 +204,120 @@
 .roster-card:not(.is-starter) { border-top-color: var(--navy-700); }
 .roster-card:not(.is-starter) .roster-number { color: var(--navy-300); }
 .roster-kana .gacha-stars { font-size: 10px; letter-spacing: 0; }
+
+/* ---------- 売却 ---------- */
+.roster-sell-toggle {
+  flex: none;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  background: var(--navy-700);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  cursor: pointer;
+}
+.roster-sell-toggle.is-active { background: var(--cream); color: var(--ink); }
+.roster-sell-toggle:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--yellow); }
+
+/* 売却モード:ステータスを畳んでカードを選びやすくする */
+.roster-list.is-selling .roster-stats { display: none; }
+.roster-list.is-selling .roster-card { cursor: pointer; transition: transform 0.12s ease, background-color 0.12s ease; }
+.roster-list.is-selling .roster-card:active { transform: scale(0.98); }
+.roster-list.is-selling .roster-card:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.roster-list.is-selling .roster-card.is-locked { cursor: default; opacity: 0.45; }
+.roster-list.is-selling .roster-card.is-selected { background: #3a2a2a; border-top-color: var(--orange); }
+.roster-sell-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--navy-300);
+}
+.roster-sell-check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--navy-300);
+  box-sizing: border-box;
+  transform: skewX(-12deg);
+}
+.roster-card.is-selected .roster-sell-check { background: var(--orange); border-color: var(--orange); }
+.roster-card.is-selected .roster-sell-check::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 10px;
+  margin: 1px 0 0 5px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.roster-sell-reward { color: var(--cream); }
+
+/* 下部バー(選んだ人数・獲得アイテム・売却ボタン) */
+.roster-sellbar {
+  flex: none;
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--navy-850);
+  border-top: 2px solid var(--orange);
+}
+.roster-sellbar[hidden] { display: none; }
+.roster-sellbar-inner {
+  max-width: var(--content-max, 560px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 72px 120px;
+  align-items: center;
+  gap: 10px;
+}
+.roster-sellbar-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.roster-sellbar-count { font-size: 12px; font-weight: 900; color: var(--navy-300); }
+.roster-sellbar-count b { font-family: var(--font-en); font-weight: normal; font-size: 24px; color: #fff; margin-right: 2px; }
+.roster-sellbar-reward { font-size: 11px; font-weight: 700; color: var(--cream); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-sellbar .training-btn { height: 44px; font-size: 14px; }
+
+/* 確認ダイアログ */
+.roster-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 13, 36, 0.78);
+  animation: screen-in 0.18s ease both;
+}
+.roster-confirm-card {
+  width: 100%;
+  max-width: 420px;
+  max-height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px 18px 18px;
+  background: var(--navy-850);
+  border-top: 3px solid var(--orange);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%);
+}
+.roster-confirm-title { margin: 0 0 10px; font-size: 18px; font-weight: 900; }
+.roster-confirm-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+.roster-confirm-list li { display: flex; align-items: baseline; gap: 8px; font-size: 14px; font-weight: 700; }
+.roster-confirm-list li span { flex: 1; }
+.roster-confirm-list li small { font-family: var(--font-en); font-size: 14px; color: var(--navy-300); }
+.roster-confirm-list .gacha-stars { flex: none; width: 5.2em; font-size: 11px; letter-spacing: 0; }
+.roster-confirm-reward { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--navy-300); }
+.roster-confirm-reward b { color: var(--cream); }
+.roster-confirm-note { margin: 0 0 14px; font-size: 11px; font-weight: 700; color: #ffb4a8; }

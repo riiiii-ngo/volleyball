@@ -25,14 +25,18 @@
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
  *   loadPlayer()            → { id, name, paidDiamonds, freeDiamonds, coins }   操作しているプレイヤー
- *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行>, maxPlayerCharacterId? }
- *                               初期の所持選手。maxPlayerCharacterId は全プレイヤーの行の最大ID(新しい行の採番用)
+ *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行>, maxPlayerCharacterId?,
+ *                               deckPlayerCharacterIds? }
+ *                               初期の所持選手。maxPlayerCharacterId は全プレイヤーの行の最大ID(新しい行の採番用)、
+ *                               deckPlayerCharacterIds は自分のデッキ(全デッキ・全枠)に置かれている所持選手のID(売却できない)
  *   loadItems()             → { items: Array<{ id, type, name, effectValue|null }>,
  *                               shopItems: Array<{ id, itemId, quantity, currencyType, currencyItemId|null, price }>,
  *                               owned: Array<{ itemId, quantity }> }   owned は初期の所持アイテム
  *   loadProgress()          → { owned: { [player_character_id]: { level, exp, points, bonus: { [stat]: n } } },
  *                               ownedCharacters?: Array<player_characters の行>,
- *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ
+ *                               sold?: Array<player_character_id>,
+ *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ、
+ *                               sold は売却した所持選手(初期の所持選手も含む)のID
  *                               (以前のセーブの characters: { [キャラID]: ... } は、自チームのその選手の分として読み替える)
  *   saveProgress(progress)  → 保存完了で resolve
  *   保存先の形(data/*.json や DB のテーブル)からこの形への変換はソースが行う(例: js/data/json-source.js)。
@@ -79,6 +83,10 @@
     item: 'アイテム'
   });
   const GACHA_COUNTS = Object.freeze([1, 10]); // 単発 / 10連
+
+  // 選手を売却した時にもらえるアイテム(レア度 → 経験値チケットLv1の枚数)
+  const SELL_REWARD_ITEM_ID = 'i_exp_ticket_1';
+  const SELL_REWARD_COUNTS = Object.freeze({ 1: 1, 2: 2, 3: 4, 4: 8, 5: 16 });
 
   // アイテム種別(schema の item_type)の表示名
   const ITEM_TYPE_LABELS = Object.freeze({
@@ -148,7 +156,9 @@
 
   // 操作中のプレイヤーの所持選手の行(初期の所持選手 + ガチャで獲得した選手)。
   function ownedRows(d) {
-    return d.initialOwned.concat(d.progress.ownedCharacters).filter(r => r.player_id === d.playerId);
+    const sold = new Set(d.progress.sold);
+    return d.initialOwned.concat(d.progress.ownedCharacters)
+      .filter(r => r.player_id === d.playerId && !sold.has(r.player_character_id));
   }
 
   function ownedRow(d, playerCharacterId) {
@@ -213,8 +223,21 @@
     });
   }
 
+  // 所持選手(buildUnit に売却の情報を足したもの)。
+  //   inDeck: デッキに置かれている(売却できない)、sellReward: 売却でもらえるアイテムと個数
   function buildOwned(d, row) {
-    return buildUnit(d, row, d.master.get(row.character_id), teamOf(d, row.player_character_id));
+    const unit = buildUnit(d, row, d.master.get(row.character_id), teamOf(d, row.player_character_id));
+    const reward = sellRewardOf(d, unit.rarity);
+    return Object.freeze(Object.assign({}, unit, {
+      inDeck: d.deckIds.has(row.player_character_id),
+      sellReward: reward ? Object.freeze({ itemId: reward.item.id, itemName: reward.item.name, count: reward.count }) : null
+    }));
+  }
+
+  function sellRewardOf(d, rarity) {
+    const item = d.itemMaster.get(SELL_REWARD_ITEM_ID);
+    const count = SELL_REWARD_COUNTS[rarity] || 0;
+    return item && count > 0 ? { item: item, count: count } : null;
   }
 
   // セーブの進行状況1件の補正。割り振り分は行のステータスと合わせて99を超えないようにする。
@@ -240,9 +263,13 @@
     out.ownedCharacters = ((raw && raw.ownedCharacters) || [])
       .map(row => normalizeOwnedRow(row, ctx.master))
       .filter(Boolean);
+    // 売却した所持選手のID(デッキに入っている選手は売れないので無視する)
+    out.sold = Array.from(new Set(((raw && raw.sold) || []).map(id => Math.round(Number(id)))))
+      .filter(id => id >= 1 && !ctx.deckIds.has(id));
+    const sold = new Set(out.sold);
     const rows = new Map();
     ctx.initialOwned.concat(out.ownedCharacters)
-      .filter(r => r.player_id === ctx.playerId)
+      .filter(r => r.player_id === ctx.playerId && !sold.has(r.player_character_id))
       .forEach(r => rows.set(r.player_character_id, r));
 
     out.owned = {};
@@ -389,12 +416,15 @@
           // 初期の所持選手(マスタ側。ゲームからは書き換えない)。獲得分は progress.ownedCharacters
           const initialOwned = (rawOwned.characters || []).map(row => normalizeOwnedRow(row, master)).filter(Boolean);
           const playerId = rawOwned.playerId;
+          const deckIds = new Set((rawOwned.deckPlayerCharacterIds || []).map(Number));
           return {
             master: master,
             teams: rawTeams,
             progress: normalizeProgress(rawProgress, {
-              master: master, itemMaster: items.master, initialOwned: initialOwned, playerId: playerId, teams: rawTeams
+              master: master, itemMaster: items.master, initialOwned: initialOwned, playerId: playerId, teams: rawTeams,
+              deckIds: deckIds
             }),
+            deckIds: deckIds,
             itemMaster: items.master,
             shopItems: items.shopItems,
             // 初期の所持アイテム { [itemId]: 所持数 }(マスタ側。変わった分は progress.items)
@@ -593,7 +623,9 @@
 
       const owned = d.initialOwned.concat(d.progress.ownedCharacters);
       const ownedIds = new Set(owned.filter(r => r.player_id === d.playerId).map(r => r.character_id));
-      let nextId = owned.reduce((max, r) => Math.max(max, r.player_character_id), d.maxPlayerCharacterId) + 1;
+      // 売却した選手のIDも使い回さない
+      let nextId = owned.map(r => r.player_character_id).concat(d.progress.sold)
+        .reduce((max, id) => Math.max(max, id), d.maxPlayerCharacterId) + 1;
       const results = [];
       for (let i = 0; i < count; i++) {
         const m = d.master.get(pickRate(g.rates.filter(r => r.probability > 0)).characterId);
@@ -736,6 +768,42 @@
       .map(row => buildOwned(d, row)));
   }
 
+  /**
+   * 所持選手をまとめて売却し、レア度に応じた経験値チケットを受け取る。
+   * デッキに置かれている選手は売却できない。売却した選手のレベル・育成も消える。
+   * DB に移した時は、不正防止のため売却処理をサーバー側で行うこと。
+   * @param {number[]} playerCharacterIds - 所持選手ID(1人以上)
+   * @returns {Promise<{ soldCount:number, rewards: Array<{ item, count }> }>} item は受け取り後の所持数を含む
+   */
+  function sellCharacters(playerCharacterIds) {
+    return load().then(d => {
+      const ids = Array.from(new Set((playerCharacterIds || []).map(Number)));
+      if (!ids.length) throw new Error('売却する選手を選んでください');
+      const rows = ids.map(id => requireOwned(d, id));
+      rows.forEach(row => {
+        if (d.deckIds.has(row.player_character_id)) {
+          throw new Error(d.master.get(row.character_id).name + 'はデッキに入っているので売却できません');
+        }
+      });
+      const totals = new Map(); // itemId → 個数
+      rows.forEach(row => {
+        const reward = sellRewardOf(d, d.master.get(row.character_id).rarity);
+        if (reward) totals.set(reward.item.id, (totals.get(reward.item.id) || 0) + reward.count);
+      });
+      const soldIds = new Set(ids);
+      d.progress.ownedCharacters = d.progress.ownedCharacters.filter(r => !soldIds.has(r.player_character_id));
+      ids.forEach(id => {
+        d.progress.sold.push(id);
+        delete d.progress.owned[id];
+      });
+      totals.forEach((count, itemId) => { d.progress.items[itemId] = itemCount(d, itemId) + count; });
+      return save(d).then(() => ({
+        soldCount: ids.length,
+        rewards: Array.from(totals.keys()).map(itemId => ({ item: buildItem(d, d.itemMaster.get(itemId)), count: totals.get(itemId) }))
+      }));
+    });
+  }
+
   /** 所持選手1体。無ければ null。 */
   function getOwnedCharacter(playerCharacterId) {
     return load().then(d => {
@@ -766,6 +834,7 @@
     drawGacha: drawGacha,
     getOwnedCharacters: getOwnedCharacters,
     getOwnedCharacter: getOwnedCharacter,
+    sellCharacters: sellCharacters,
     getItems: getItems,
     getShopItems: getShopItems,
     buyShopItem: buyShopItem,

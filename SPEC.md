@@ -129,9 +129,9 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 
 ### 保存先の切り替え(JSON → DB)
 - データは「マスタ」(キャラクターの初期値・チーム編成・初期の所持選手/所持アイテム。ゲームからは書き換えない)と「セーブ」(所持選手1体ごとのレベル・経験値・育成ポイント・割り振ったステータス、ガチャで獲得した所持選手、アイテムの所持数)の2種類。画面に渡す選手は、所持選手の行のステータスにセーブの割り振り分を足したもの(試合用8項目の`stats`、全10項目の`allStats`)で、`playerCharacterId`・`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`・`team`(自チームでの立ち位置と背番号。控えは`null`)も持つ。同じ選手を2体持っていても、レベル・育成は別々。
-- ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getTeam(id)`/`getPlayer()`(ユーザ名・ダイヤ・コイン)/`getOwnedCharacters()`/`getOwnedCharacter(所持選手ID)`/`reload()`など。書き込み:`allocatePoints(所持選手ID, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)/`useExpTicket(所持選手ID, アイテムID)`など。保存先の違いは「ソース」が吸収する。
+- ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getTeam(id)`/`getPlayer()`(ユーザ名・ダイヤ・コイン)/`getOwnedCharacters()`/`getOwnedCharacter(所持選手ID)`/`reload()`など。書き込み:`allocatePoints(所持選手ID, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)/`useExpTicket(所持選手ID, アイテムID)`/`sellCharacters(所持選手IDの配列)`など。保存先の違いは「ソース」が吸収する。
 - 使うソースは`index.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
-- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], items: { [アイテムID]: 所持数 } }`)の7つ。
+- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], sold: [売却した所持選手ID], items: { [アイテムID]: 所持数 } }`)の7つ。`loadOwnedCharacters()`はデッキに置かれている所持選手のID(`deckPlayerCharacterIds`、売却不可の判定用)も返す。
 - 以前のセーブ(キャラID単位の`characters`)は、読み込み時に自チームでその選手を使っている所持選手の分として引き継ぐ(自チームにいない選手の分は捨てる)。
 - ガチャで獲得した所持選手のIDは、全プレイヤーの`player_characters`の最大ID+1から採番する(`loadOwnedCharacters()`の`maxPlayerCharacterId`。以前は自分の行だけで数えていたため、相手プレイヤーの行とIDが重なっていた)。
 - `json`ソースでは、静的ファイルには書き込めないためセーブをブラウザの`localStorage`(キー`volleyball.progress.v1`)に保存する。そのブラウザ・端末の中だけに残り、別の端末とは共有されない。DBソースに切り替えればサーバー側に保存される。
@@ -220,6 +220,10 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - 所持選手(`player_characters`の初期の所持選手＋ガチャで獲得した選手)をカードで表示(背番号・レア度・名前・ふりがな・ポジション・役割・身長・レベルと経験値バー・10ステータスのバー)。データは`VolleyballData.getOwnedCharacters()`。
 - 並び順:スタメン(自チームのデッキで試合に出る6人。試合の立ち位置順、背番号・役割付き) → 控え(レア度の高い順 → 獲得順)。控えはカード上の線を暗くし、背番号は「-」。デッキに入っていても試合で使わない枠(MB2)は控え扱い。
 - レベル・経験値・育成ポイント・ステータスは所持選手1体ごとの値(経験値チケット・育成の結果を反映)。
+- 売却:「売却」ボタンで売却モードにし、カードをタップして複数選ぶ(もう一度タップで解除)。売却モードではステータスを畳み、各カードに売却でもらえるアイテムを表示する。下部のバーに選んだ人数と獲得アイテムの合計、「解除」「売却する」。「売却する」→確認ダイアログ(選んだ選手・獲得アイテム・元に戻せない旨)→「売却する」でまとめて売却(`VolleyballData.sellCharacters(所持選手IDの配列)`)。
+  - もらえるもの:経験値チケットLv1を、★1=1枚、★2=2枚、★3=4枚、★4=8枚、★5=16枚(`js/data/repository.js`の`SELL_REWARD_COUNTS`)。
+  - 自分のデッキ(全デッキ・全枠。2番デッキや試合で使わないMB2の枠も含む)に置かれている選手は売却できない(「デッキ使用中のため売却不可」と表示し、選べない)。
+  - 売却した選手は所持選手から消え、レベル・育成のセーブも消える。`json`ソースではセーブの`sold`(売却した所持選手ID)に記録する(初期の所持選手は`data/`を書き換えられないため)。売却した選手のIDは新しく獲得した選手に使い回さない。
 - 75以上のステータスはオレンジで強調、育成で上げた分は数値の右上に「+n」。縦長1列、横長2列。
 
 ## コート仕様(`court.js`)
@@ -312,6 +316,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
   - スタメン(デッキ)を変える画面はまだ無いので、試合に出るのは`party_deck_members`の初期の6人のまま。
   - 有料のガチャ(ダイヤ・コイン・チケット)は一覧に出るが引けない(ボタンが押せず「準備中」と表示)。ダイヤ・コインはヘッダーに`players`の初期値を表示するだけで、増減させる処理(とセーブ)がまだ無い。
   - ガチャで獲得した選手は`json`ソースではブラウザの`localStorage`にだけ保存され、`data/player_characters.json`には書き込まれない。選手一覧・選手育成には出るが、スタメンにはまだ入れられない。
+  - 売却もブラウザ側で行っている。DBに移す時はサーバー側で`player_characters`の行を削除し、アイテムを付与すること。
   - 抽選はブラウザ側で行っている。DBに移す時は不正防止のため、抽選と所持選手の登録をサーバー側に移すこと。
 
 ## 今後の拡張候補(未実装)

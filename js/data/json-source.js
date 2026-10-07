@@ -150,11 +150,21 @@
       },
 
       loadOwnedCharacters() {
-        return loadTable('player_characters').then(rows => ({
-          playerId: PLAYER_ID,
-          characters: rows.filter(r => r.player_id === PLAYER_ID),
-          maxPlayerCharacterId: rows.reduce((max, r) => Math.max(max, r.player_character_id), 0)
-        }));
+        return Promise.all(['player_characters', 'party_decks', 'party_deck_members'].map(loadTable))
+          .then(([rows, decks, members]) => {
+            // 自分のデッキ(全デッキ・全枠)に置かれている所持選手。売却できない。
+            const deckIds = new Set(decks.filter(d => d.player_id === PLAYER_ID).map(d => d.deck_id));
+            const inDeck = [];
+            members.filter(m => deckIds.has(m.deck_id)).forEach(m => Object.keys(m).forEach(k => {
+              if (/_player_character_id$/.test(k) && m[k] != null) inDeck.push(m[k]);
+            }));
+            return {
+              playerId: PLAYER_ID,
+              characters: rows.filter(r => r.player_id === PLAYER_ID),
+              maxPlayerCharacterId: rows.reduce((max, r) => Math.max(max, r.player_character_id), 0),
+              deckPlayerCharacterIds: inDeck
+            };
+          });
       },
 
       loadProgress() {
