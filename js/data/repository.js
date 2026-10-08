@@ -743,6 +743,69 @@
     });
   }
 
+  /**
+   * 一括レベルアップの計画(保存はしない)。所持している経験値チケットで target レベルまで上げる時に、
+   * どのチケットを何枚使うかを VolleyballProgression.planExpTickets で決める(経験値の多いチケットを優先)。
+   * @param {number} playerCharacterId - 所持選手ID
+   * @param {number} [targetLevel] - 目標レベル。省略すると手持ちのチケットで届く最高レベル。届かない値は届く最高レベルに丸める
+   * @returns {Promise<{ level, exp, reachableLevel, targetLevel, needExp, totalExp,
+   *   uses: Array<{ item, count }>, resultLevel, resultExp, resultExpToNext, pointsGained }>}
+   *   reachableLevel が今のレベルと同じなら上げられない(uses は空)
+   */
+  function planLevelUp(playerCharacterId, targetLevel) {
+    return load().then(d => buildLevelUpPlan(d, requireOwned(d, playerCharacterId), targetLevel));
+  }
+
+  function buildLevelUpPlan(d, row, targetLevel) {
+    const p = progressOf(d, row);
+    const tickets = Array.from(d.itemMaster.values())
+      .filter(i => i.type === 'exp_ticket' && itemCount(d, i.id) > 0);
+    const allExp = tickets.reduce((sum, i) => sum + i.effectValue * itemCount(d, i.id), 0);
+    const reachableLevel = VolleyballProgression.addExp(p, allExp).level;
+    let target = targetLevel == null ? reachableLevel : Math.round(Number(targetLevel)) || p.level;
+    target = Math.max(p.level, Math.min(reachableLevel, target));
+    const needExp = VolleyballProgression.expToReach(p.level, p.exp, target);
+    const plan = target > p.level
+      ? VolleyballProgression.planExpTickets(needExp, tickets.map(i => ({ id: i.id, value: i.effectValue, count: itemCount(d, i.id) })))
+      : { uses: {}, total: 0 };
+    const after = VolleyballProgression.addExp(p, plan.total);
+    return {
+      level: p.level,
+      exp: p.exp,
+      reachableLevel: reachableLevel,
+      targetLevel: target,
+      needExp: needExp,
+      totalExp: plan.total,
+      uses: tickets.filter(i => plan.uses[i.id] > 0)
+        .sort((a, b) => b.effectValue - a.effectValue)
+        .map(i => ({ item: buildItem(d, i), count: plan.uses[i.id] })),
+      resultLevel: after.level,
+      resultExp: after.exp,
+      resultExpToNext: VolleyballProgression.expToNext(after.level),
+      pointsGained: after.pointsGained
+    };
+  }
+
+  /**
+   * 一括レベルアップ。planLevelUp と同じ計画でチケットを使い、target レベルまで上げる。
+   * @returns {Promise<{ character, levelsGained, pointsGained, exp, uses: Array<{ item, count }> }>}
+   */
+  function levelUpWithTickets(playerCharacterId, targetLevel) {
+    return load().then(d => {
+      const row = requireOwned(d, playerCharacterId);
+      const plan = buildLevelUpPlan(d, row, targetLevel);
+      if (plan.targetLevel <= plan.level) {
+        throw new Error(plan.level >= VolleyballProgression.MAX_LEVEL ? 'これ以上レベルを上げられません' : '経験値チケットが足りません');
+      }
+      plan.uses.forEach(u => { d.progress.items[u.item.id] = itemCount(d, u.item.id) - u.count; });
+      const r = grantExp(d, row, plan.totalExp);
+      return save(d).then(() => Object.assign(expResult(d, r), {
+        exp: plan.totalExp,
+        uses: plan.uses.map(u => ({ item: buildItem(d, d.itemMaster.get(u.item.id)), count: u.count }))
+      }));
+    });
+  }
+
   // ---------- プレイヤー ----------
 
   /**
@@ -840,6 +903,8 @@
     getShopItems: getShopItems,
     buyShopItem: buyShopItem,
     useExpTicket: useExpTicket,
+    planLevelUp: planLevelUp,
+    levelUpWithTickets: levelUpWithTickets,
     reload: reload
   });
 })(window);

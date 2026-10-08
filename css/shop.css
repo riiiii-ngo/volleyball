@@ -83,3 +83,51 @@
   color: var(--navy-300);
 }
 .training-section-title a { margin-left: 8px; color: var(--orange); font-size: 12px; }
+
+/* 選手育成:一括レベルアップ */
+.training-bulk {
+  margin: 0 0 18px;
+  padding: 12px 14px 14px;
+  background: var(--navy-850);
+  border-left: 4px solid var(--orange);
+}
+.training-bulk-target {
+  display: grid;
+  grid-template-columns: auto 40px 1fr 40px auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.training-bulk-label { font-size: 12px; font-weight: 900; color: var(--navy-300); }
+.training-bulk-level { text-align: center; font-family: var(--font-en); font-size: 15px; color: var(--navy-300); }
+.training-bulk-level b { font-weight: normal; font-size: 28px; color: #fff; margin-left: 2px; }
+.training-bulk-max {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-en);
+  font-size: 16px;
+  line-height: 1;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  cursor: pointer;
+}
+.training-bulk-max small { margin-left: 4px; font-size: 11px; opacity: 0.7; }
+.training-bulk-max:disabled { opacity: 0.3; cursor: default; }
+.training-bulk-uses {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.training-bulk-uses li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; }
+.training-bulk-uses li span { flex: 1; }
+.training-bulk-uses li b { font-family: var(--font-en); font-weight: normal; font-size: 18px; color: var(--yellow); }
+.training-bulk-uses li small { font-family: var(--font-en); font-size: 12px; color: var(--navy-300); }
+.training-bulk-exp { margin: 0 0 2px; font-size: 11px; font-weight: 700; color: var(--navy-300); }
+.training-bulk-result { margin: 0 0 10px; font-size: 13px; font-weight: 900; color: var(--navy-300); }
+.training-bulk-result b { font-family: var(--font-en); font-weight: normal; font-size: 22px; color: #fff; }
+.training-bulk-result small { margin-left: 10px; font-size: 11px; color: var(--yellow); }
+.training-bulk-apply { width: 100%; height: 46px; }

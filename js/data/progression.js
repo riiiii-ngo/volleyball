@@ -56,6 +56,59 @@
     };
   }
 
+  /** level(経験値 exp)から target レベルに上がるのに必要な経験値の合計。 */
+  function expToReach(level, exp, target) {
+    let total = 0;
+    for (let l = level; l < Math.min(target, MAX_LEVEL); l++) total += expToNext(l);
+    return Math.max(0, total - exp);
+  }
+
+  /**
+   * 必要経験値 need を満たす経験値チケットの使い方を決める(一括レベルアップ用)。
+   *   1. 経験値の多いチケットから順に、need を超えない範囲でできるだけ使う
+   *   2. 残りは、足りる種類のうち超える分(無駄)が一番少ないもので埋める(同じなら経験値の多い方)。
+   *      どの種類も1種類では足りなければ、経験値の多いチケットを使い切って繰り返す
+   *   3. 最後に、経験値の少ないチケットから順に、外しても need を下回らない分を外す(無駄を減らす)
+   * @param {number} need
+   * @param {Array<{ id, value:number, count:number }>} stock - value は1枚の経験値、count は所持数
+   * @returns {{ uses: Object<string, number>, total:number } | null} 所持チケット全部でも足りなければ null
+   */
+  function planExpTickets(need, stock) {
+    const list = stock.filter(t => t.value > 0 && t.count > 0)
+      .map(t => ({ id: t.id, value: t.value, left: t.count }))
+      .sort((a, b) => b.value - a.value);
+    if (list.reduce((sum, t) => sum + t.value * t.left, 0) < need) return null;
+    const uses = {};
+    let total = 0;
+    function use(t, n) {
+      if (n <= 0) return;
+      uses[t.id] = (uses[t.id] || 0) + n;
+      t.left -= n;
+      total += t.value * n;
+    }
+    list.forEach(t => use(t, Math.min(t.left, Math.floor((need - total) / t.value))));
+    while (total < need) {
+      const rest = need - total;
+      const fits = list.filter(t => t.left * t.value >= rest);
+      if (fits.length) {
+        const waste = t => Math.ceil(rest / t.value) * t.value - rest;
+        const best = fits.reduce((a, b) => (waste(b) < waste(a) || (waste(b) === waste(a) && b.value > a.value) ? b : a));
+        use(best, Math.ceil(rest / best.value));
+      } else {
+        use(list.find(t => t.left > 0), list.find(t => t.left > 0).left);
+      }
+    }
+    list.slice().reverse().forEach(t => {
+      const drop = Math.min(uses[t.id] || 0, Math.floor((total - need) / t.value));
+      if (drop > 0) {
+        uses[t.id] -= drop;
+        total -= t.value * drop;
+        if (!uses[t.id]) delete uses[t.id];
+      }
+    });
+    return { uses: uses, total: total };
+  }
+
   global.VolleyballProgression = Object.freeze({
     MAX_LEVEL: MAX_LEVEL,
     POINTS_PER_LEVEL: POINTS_PER_LEVEL,
@@ -63,6 +116,8 @@
     statUpCost: statUpCost,
     statUpTotalCost: statUpTotalCost,
     expToNext: expToNext,
-    addExp: addExp
+    addExp: addExp,
+    expToReach: expToReach,
+    planExpTickets: planExpTickets
   });
 })(window);

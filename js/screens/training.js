@@ -6,7 +6,8 @@
  * 割り振りは「＋/−」で仮決めし、「決定」で VolleyballData.allocatePoints() に保存する。
  * 1上げるのに使うポイントは、そのステータスを育成で上げた回数に応じて段階的に増える(VolleyballProgression.statUpCost)。
  * 保存済みの割り振りは戻せない(−は今回仮決めした分だけ)。
- * 割り振り画面では、所持している経験値チケットを使ってレベルを上げられる(VolleyballData.useExpTicket())。
+ * 割り振り画面では、所持している経験値チケットを使ってレベルを上げられる(1枚ずつ: VolleyballData.useExpTicket()、
+ * 一括レベルアップ: 目標レベルを選ぶと使うチケットを VolleyballData.planLevelUp() で計算し、levelUpWithTickets() で使う)。
  */
 (function () {
   'use strict';
@@ -64,6 +65,8 @@
 
     let character = null;
     let tickets = []; // 所持している経験値チケット
+    let bulkTarget = null; // 一括レベルアップの目標レベル(null なら今のレベル+1)
+    let plan = null; // 一括レベルアップの計画(VolleyballData.planLevelUp の結果)
     let pending = {}; // 今回仮決めしている上げ幅 { stat: n }
     let busy = false;
 
@@ -88,6 +91,7 @@
             VolleyballUI.levelHtml(c) +
           '</div>' +
           ticketsHtml(c) +
+          bulkHtml(c) +
           '<p class="training-left">育成ポイント <b class="' + (left > 0 ? 'has-points' : '') + '">' + left + '</b> / ' + c.points + '</p>' +
           '<p class="training-hint">1上げるのに使うポイントは、育成で上げた回数に応じて増えます(' +
             VolleyballProgression.COST_STEP + '回ごとに+1pt)。</p>' +
@@ -121,7 +125,7 @@
           '</div>' +
         '</div>';
 
-      content.querySelectorAll('.training-step').forEach(btn => {
+      content.querySelectorAll('.training-step[data-stat]').forEach(btn => {
         btn.addEventListener('click', () => {
           const k = btn.dataset.stat;
           pending[k] = Math.max(0, (pending[k] || 0) + Number(btn.dataset.step));
@@ -136,19 +140,36 @@
           VolleyballData.useExpTicket(c.playerCharacterId, btn.dataset.item).then(r => {
             if (state.disposed) return;
             character = r.character;
-            return VolleyballData.getItems('exp_ticket').then(list => {
-              if (state.disposed) return;
-              tickets = list;
-              draw();
-              app.toast(r.levelsGained > 0
-                ? 'LEVEL UP! ' + r.character.name + ' Lv.' + r.character.level + '(育成ポイント+' + r.pointsGained + ')'
-                : r.character.name + 'が経験値を' + r.exp + '獲得しました');
-            });
+            app.toast(r.levelsGained > 0
+              ? 'LEVEL UP! ' + r.character.name + ' Lv.' + r.character.level + '(育成ポイント+' + r.pointsGained + ')'
+              : r.character.name + 'が経験値を' + r.exp + '獲得しました');
+            return reloadTickets();
           }).catch(err => app.toast(err.message)).then(() => { busy = false; });
         });
       });
-      content.querySelector('.is-reset').addEventListener('click', () => { pending = {}; draw(); });
-      content.querySelector('.is-apply').addEventListener('click', () => {
+      content.querySelectorAll('.training-bulk-step').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const to = btn.dataset.to === 'max' ? plan.reachableLevel : plan.targetLevel + Number(btn.dataset.to);
+          bulkTarget = Math.max(c.level + 1, Math.min(plan.reachableLevel, to));
+          refreshPlan();
+        });
+      });
+      const bulkBtn = content.querySelector('.training-bulk-apply');
+      if (bulkBtn) bulkBtn.addEventListener('click', () => {
+        if (busy) return;
+        busy = true;
+        VolleyballData.levelUpWithTickets(c.playerCharacterId, plan.targetLevel).then(r => {
+          if (state.disposed) return;
+          character = r.character;
+          bulkTarget = null;
+          app.toast(r.levelsGained > 0
+            ? 'LEVEL UP! ' + r.character.name + ' Lv.' + r.character.level + '(育成ポイント+' + r.pointsGained + ')'
+            : r.character.name + 'が経験値を' + r.exp + '獲得しました');
+          return reloadTickets();
+        }).catch(err => app.toast(err.message)).then(() => { busy = false; });
+      });
+      content.querySelector('.training-actions .is-reset').addEventListener('click', () => { pending = {}; draw(); });
+      content.querySelector('.training-actions .is-apply').addEventListener('click', () => {
         VolleyballData.allocatePoints(c.playerCharacterId, pending).then(updated => {
           if (state.disposed) return;
           character = updated;
@@ -175,12 +196,58 @@
             '</li>').join('') + '</ul>');
     }
 
+    // 一括レベルアップ:目標レベル・使うチケット・上がった後のレベル
+    function bulkHtml(c) {
+      if (!tickets.length) return '';
+      const title = '<p class="training-section-title">一括レベルアップ</p>';
+      if (c.expToNext === 0) return title + '<p class="training-hint">最大レベルです。</p>';
+      if (!plan || plan.reachableLevel <= c.level) {
+        return title + '<p class="training-hint">次のレベルまでの経験値チケットが足りません。</p>';
+      }
+      const t = plan.targetLevel;
+      return title +
+        '<div class="training-bulk">' +
+          '<div class="training-bulk-target">' +
+            '<span class="training-bulk-label">目標</span>' +
+            '<button type="button" class="training-step training-bulk-step" data-to="-1"' + (t > c.level + 1 ? '' : ' disabled') + ' aria-label="目標レベルを下げる">−</button>' +
+            '<span class="training-bulk-level">Lv.<b>' + t + '</b></span>' +
+            '<button type="button" class="training-step training-bulk-step" data-to="1" data-step="1"' + (t < plan.reachableLevel ? '' : ' disabled') + ' aria-label="目標レベルを上げる">＋</button>' +
+            '<button type="button" class="training-bulk-max training-bulk-step" data-to="max"' + (t < plan.reachableLevel ? '' : ' disabled') + '>MAX<small>Lv.' + plan.reachableLevel + '</small></button>' +
+          '</div>' +
+          '<ul class="training-bulk-uses">' + plan.uses.map(u =>
+            '<li><span>' + esc(u.item.name) + '</span><b>×' + u.count + '</b><small>/ ' + u.item.count + '</small></li>').join('') +
+          '</ul>' +
+          '<p class="training-bulk-exp">経験値 +' + plan.totalExp + '(必要 ' + plan.needExp + ')</p>' +
+          '<p class="training-bulk-result">Lv.' + c.level + ' → <b>Lv.' + plan.resultLevel + '</b>' +
+            '<small>育成ポイント+' + plan.pointsGained + '</small></p>' +
+          '<button type="button" class="training-btn is-apply training-bulk-apply">一括レベルアップ</button>' +
+        '</div>';
+    }
+
+    function refreshPlan() {
+      const c = character;
+      const target = bulkTarget != null ? bulkTarget : c.level + 1;
+      return VolleyballData.planLevelUp(c.playerCharacterId, target).then(p => {
+        if (state.disposed) return;
+        plan = p;
+        draw();
+      });
+    }
+
+    function reloadTickets() {
+      return VolleyballData.getItems('exp_ticket').then(list => {
+        if (state.disposed) return;
+        tickets = list;
+        return refreshPlan();
+      });
+    }
+
     Promise.all([VolleyballData.getOwnedCharacter(id), VolleyballData.getItems('exp_ticket')]).then(([c, list]) => {
       if (state.disposed) return;
       if (!c) { app.go('training', [], { replace: true }); return; }
       character = c;
       tickets = list;
-      draw();
+      return refreshPlan();
     }).catch(err => {
       if (state.disposed) return;
       content.innerHTML = '<p class="roster-status is-error">' + esc(err.message) + '</p>';
