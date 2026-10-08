@@ -20,21 +20,23 @@
  * ソースが実装するメソッド(すべて Promise を返す):
  *   loadCharacters()        → Array<{ id, name, kana?, romaji?, rarity?, level?, position, number?, height?, stats,
  *                                     minStats? }>   stats は試合用8項目、minStats は ALL_STATS の Lv1 の値
- *   loadTeams()             → Array<{ id, name, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
+ *   loadTeams()             → Array<{ id, name, deckId?, deckSlots?, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
+ *                               自チーム('player')は deckId(使うデッキ)と deckSlots({ 試合の立ち位置: デッキの枠 })も返す
  *                               playerCharacterId はその枠の所持選手(player_characters)の ID
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
  *                                     singlePrice, multiPrice, rates: Array<{ characterId, probability(%) }> }>
  *   loadPlayer()            → { id, name, paidDiamonds, freeDiamonds, coins }   操作しているプレイヤー
  *   loadOwnedCharacters()   → { playerId, characters: Array<player_characters の行>, maxPlayerCharacterId?,
- *                               deckPlayerCharacterIds? }
+ *                               decks?: Array<{ deckId, deckNumber, members: { [枠]: { playerCharacterId, number } | null } }> }
  *                               初期の所持選手。maxPlayerCharacterId は全プレイヤーの行の最大ID(新しい行の採番用)、
- *                               deckPlayerCharacterIds は自分のデッキ(全デッキ・全枠)に置かれている所持選手のID(売却できない)
+ *                               decks は自分のデッキの初期の編成(枠は DECK_SLOTS の key。デッキに置かれた選手は売却できない)
  *   loadItems()             → { items: Array<{ id, type, name, effectValue|null }>,
  *                               shopItems: Array<{ id, itemId, quantity, currencyType, currencyItemId|null, price }>,
  *                               owned: Array<{ itemId, quantity }> }   owned は初期の所持アイテム
  *   loadProgress()          → { owned: { [player_character_id]: { level, exp, points, bonus: { [stat]: n } } },
  *                               ownedCharacters?: Array<player_characters の行>,
  *                               sold?: Array<player_character_id>,
+ *                               decks?: { [deckId]: { [枠]: { playerCharacterId, number } | null } },   編成し直したデッキ
  *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ、
  *                               sold は売却した所持選手(初期の所持選手も含む)のID
  *                               (以前のセーブの characters: { [キャラID]: ... } は、自チームのその選手の分として読み替える)
@@ -83,6 +85,19 @@
     item: 'アイテム'
   });
   const GACHA_COUNTS = Object.freeze([1, 10]); // 単発 / 10連
+
+  // デッキの枠(party_deck_members の <枠>_player_character_id)と、その枠の本来のポジション
+  const DECK_SLOTS = Object.freeze([
+    { key: 'ws1', label: 'WS1', position: 'WS' },
+    { key: 'ws2', label: 'WS2', position: 'WS' },
+    { key: 'mb1', label: 'MB1', position: 'MB' },
+    { key: 'mb2', label: 'MB2', position: 'MB' },
+    { key: 'op', label: 'OP', position: 'OP' },
+    { key: 'se', label: 'SE', position: 'SE' },
+    { key: 'li', label: 'LI', position: 'LI' }
+  ].map(Object.freeze));
+  // 選手を本来のポジションと違う枠に置いた時、試合で使うステータス(8項目)に掛ける倍率
+  const OFF_POSITION_RATE = 0.9;
 
   // 選手を売却した時にもらえるアイテム(レア度 → 経験値チケットLv1の枚数)
   const SELL_REWARD_ITEM_ID = 'i_exp_ticket_1';
@@ -176,11 +191,58 @@
     return p;
   }
 
-  // 自チーム('player')での立ち位置と背番号。入っていなければ null。
+  // ---------- デッキ(スタメン) ----------
+
+  function playerTeam(d) {
+    return d.teams.find(t => String(t.id) === 'player') || null;
+  }
+
+  // デッキの今の編成(編成し直していればセーブの値、なければ初期の編成)。{ [枠]: { playerCharacterId, number } | null }
+  function deckMembers(d, deckId) {
+    const saved = d.progress.decks[deckId];
+    if (saved) return saved;
+    const deck = d.decks.get(Number(deckId));
+    return deck ? deck.members : {};
+  }
+
+  // どれかのデッキに置かれている所持選手のID(売却できない)
+  function deckLockedIds(d) {
+    const ids = new Set();
+    d.decks.forEach(deck => {
+      const members = deckMembers(d, deck.deckId);
+      DECK_SLOTS.forEach(s => { if (members[s.key]) ids.add(members[s.key].playerCharacterId); });
+    });
+    return ids;
+  }
+
+  // 自チームの試合での立ち位置(slot)・背番号・デッキの枠・ポジション適性。試合に出ていなければ null。
+  //   offPosition: 選手のポジションが枠の本来のポジションと違う(試合ではステータスが OFF_POSITION_RATE 倍)
   function teamOf(d, playerCharacterId) {
-    const team = d.teams.find(t => String(t.id) === 'player');
-    const m = team && (team.members || []).find(x => Number(x.playerCharacterId) === playerCharacterId);
-    return m ? Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null }) : null;
+    const team = playerTeam(d);
+    if (!team || !team.deckSlots) return null;
+    const members = deckMembers(d, team.deckId);
+    const slot = Object.keys(team.deckSlots).find(s => {
+      const e = members[team.deckSlots[s]];
+      return e && e.playerCharacterId === playerCharacterId;
+    });
+    if (!slot) return null;
+    const key = team.deckSlots[slot];
+    const row = ownedRow(d, playerCharacterId);
+    const def = DECK_SLOTS.find(s => s.key === key);
+    return Object.freeze({
+      slot: slot,
+      number: members[key].number != null ? members[key].number : null,
+      deckSlot: key,
+      offPosition: !!(row && def && d.master.get(row.character_id).position !== def.position)
+    });
+  }
+
+  // 試合用:ポジション適性外ならステータスを下げた選手にする
+  function applyPositionRate(unit) {
+    if (!unit.team || !unit.team.offPosition) return unit;
+    const stats = {};
+    STATS.forEach(s => { stats[s.key] = Math.max(STAT_MIN, Math.round(unit.stats[s.key] * OFF_POSITION_RATE)); });
+    return Object.freeze(Object.assign({}, unit, { stats: Object.freeze(stats) }));
   }
 
   // 画面・試合に渡す選手。所持選手は行のステータス + セーブの割り振り分、
@@ -229,7 +291,7 @@
     const unit = buildUnit(d, row, d.master.get(row.character_id), teamOf(d, row.player_character_id));
     const reward = sellRewardOf(d, unit.rarity);
     return Object.freeze(Object.assign({}, unit, {
-      inDeck: d.deckIds.has(row.player_character_id),
+      inDeck: deckLockedIds(d).has(row.player_character_id),
       sellReward: reward ? Object.freeze({ itemId: reward.item.id, itemName: reward.item.name, count: reward.count }) : null
     }));
   }
@@ -256,6 +318,25 @@
     };
   }
 
+  // デッキの編成の補正。所持していない選手・同じ選手や背番号の重複・試合で使う枠の空きがあれば null。
+  function normalizeDeckMembers(raw, rows) {
+    if (!raw) return null;
+    const out = {};
+    const ids = new Set();
+    const numbers = new Set();
+    for (const s of DECK_SLOTS) {
+      const e = raw[s.key];
+      if (e == null) { out[s.key] = null; continue; }
+      const id = Math.round(Number(e.playerCharacterId));
+      const number = Math.round(Number(e.number));
+      if (!rows.has(id) || ids.has(id) || !(number >= 1 && number <= 99) || numbers.has(number)) return null;
+      ids.add(id);
+      numbers.add(number);
+      out[s.key] = { playerCharacterId: id, number: number };
+    }
+    return out;
+  }
+
   // セーブデータの読み込み時補正(壊れた値・マスタや所持選手に無いものは無視する)。
   function normalizeProgress(raw, ctx) {
     const out = {};
@@ -263,9 +344,26 @@
     out.ownedCharacters = ((raw && raw.ownedCharacters) || [])
       .map(row => normalizeOwnedRow(row, ctx.master))
       .filter(Boolean);
+    // 編成し直したデッキ(壊れていればそのデッキは初期の編成に戻す)
+    const allRows = new Map();
+    ctx.initialOwned.concat(out.ownedCharacters)
+      .filter(r => r.player_id === ctx.playerId)
+      .forEach(r => allRows.set(r.player_character_id, r));
+    out.decks = {};
+    const decks = (raw && raw.decks) || {};
+    Object.keys(decks).forEach(id => {
+      if (!ctx.decks.has(Number(id))) return;
+      const members = normalizeDeckMembers(decks[id], allRows);
+      if (members) out.decks[Number(id)] = members;
+    });
     // 売却した所持選手のID(デッキに入っている選手は売れないので無視する)
+    const locked = new Set();
+    ctx.decks.forEach(deck => {
+      const members = out.decks[deck.deckId] || deck.members;
+      DECK_SLOTS.forEach(s => { if (members[s.key]) locked.add(members[s.key].playerCharacterId); });
+    });
     out.sold = Array.from(new Set(((raw && raw.sold) || []).map(id => Math.round(Number(id)))))
-      .filter(id => id >= 1 && !ctx.deckIds.has(id));
+      .filter(id => id >= 1 && !locked.has(id));
     const sold = new Set(out.sold);
     const rows = new Map();
     ctx.initialOwned.concat(out.ownedCharacters)
@@ -416,15 +514,19 @@
           // 初期の所持選手(マスタ側。ゲームからは書き換えない)。獲得分は progress.ownedCharacters
           const initialOwned = (rawOwned.characters || []).map(row => normalizeOwnedRow(row, master)).filter(Boolean);
           const playerId = rawOwned.playerId;
-          const deckIds = new Set((rawOwned.deckPlayerCharacterIds || []).map(Number));
+          const decks = new Map((rawOwned.decks || []).map(deck => [Number(deck.deckId), {
+            deckId: Number(deck.deckId),
+            deckNumber: deck.deckNumber,
+            members: deck.members || {}
+          }]));
           return {
             master: master,
             teams: rawTeams,
             progress: normalizeProgress(rawProgress, {
               master: master, itemMaster: items.master, initialOwned: initialOwned, playerId: playerId, teams: rawTeams,
-              deckIds: deckIds
+              decks: decks
             }),
-            deckIds: deckIds,
+            decks: decks,
             itemMaster: items.master,
             shopItems: items.shopItems,
             // 初期の所持アイテム { [itemId]: 所持数 }(マスタ側。変わった分は progress.items)
@@ -458,10 +560,18 @@
       const raw = d.teams.find(t => String(t.id) === String(id));
       if (!raw) throw new Error('チーム "' + id + '" が見つかりません');
       const isPlayer = String(raw.id) === 'player';
-      return Object.freeze({
-        id: String(raw.id),
-        name: raw.name || raw.id,
-        members: Object.freeze((raw.members || []).map(m => {
+      let members;
+      if (isPlayer && raw.deckSlots) {
+        // 自チームはデッキの今の編成から作る(ポジション適性外の選手はステータスが下がる)
+        const deck = deckMembers(d, raw.deckId);
+        members = Object.keys(raw.deckSlots).map(slot => {
+          const e = deck[raw.deckSlots[slot]];
+          const row = e && ownedRow(d, e.playerCharacterId);
+          if (!row) throw new Error('スタメンの ' + raw.deckSlots[slot].toUpperCase() + ' に選手がいません');
+          return Object.freeze({ slot: slot, character: applyPositionRate(buildOwned(d, row)) });
+        });
+      } else {
+        members = (raw.members || []).map(m => {
           const row = isPlayer ? ownedRow(d, m.playerCharacterId) : null;
           if (isPlayer && !row) throw new Error('チーム "' + raw.id + '" の ' + m.slot + ' の所持選手が見つかりません');
           const team = Object.freeze({ slot: m.slot, number: m.number != null ? m.number : null });
@@ -469,7 +579,12 @@
             slot: m.slot,
             character: buildUnit(d, row, d.master.get(String(m.characterId)), team)
           });
-        }))
+        });
+      }
+      return Object.freeze({
+        id: String(raw.id),
+        name: raw.name || raw.id,
+        members: Object.freeze(members)
       });
     });
   }
@@ -806,6 +921,97 @@
     });
   }
 
+  // ---------- スタメン(自チームのデッキ) ----------
+
+  function requireLineupDeck(d) {
+    const team = playerTeam(d);
+    if (!team || !team.deckSlots || !d.decks.has(Number(team.deckId))) throw new Error('自チームのデッキが見つかりません');
+    return team;
+  }
+
+  function buildLineup(d) {
+    const team = requireLineupDeck(d);
+    const members = deckMembers(d, team.deckId);
+    const gameSlotOf = {};
+    Object.keys(team.deckSlots).forEach(slot => { gameSlotOf[team.deckSlots[slot]] = slot; });
+    return Object.freeze({
+      deckId: Number(team.deckId),
+      deckNumber: d.decks.get(Number(team.deckId)).deckNumber,
+      offPositionRate: OFF_POSITION_RATE,
+      slots: Object.freeze(DECK_SLOTS.map(def => {
+        const e = members[def.key];
+        const row = e && ownedRow(d, e.playerCharacterId);
+        const member = row ? buildOwned(d, row) : null;
+        return Object.freeze({
+          key: def.key,
+          label: def.label,
+          position: def.position,
+          gameSlot: gameSlotOf[def.key] || null, // 試合での立ち位置(null は試合に出ない枠)
+          required: !!gameSlotOf[def.key], // 試合に出る枠は空けられない
+          number: e ? e.number : null,
+          member: member,
+          offPosition: !!(member && member.position !== def.position)
+        });
+      }))
+    });
+  }
+
+  /**
+   * スタメン(自チームが試合で使うデッキ)の編成。
+   * @returns {Promise<{ deckId, deckNumber, offPositionRate, slots: Array<{ key, label, position, gameSlot, required,
+   *   number, member, offPosition }> }>} member は getOwnedCharacters() と同じ形(空きは null)
+   */
+  function getLineup() {
+    return load().then(buildLineup);
+  }
+
+  /**
+   * スタメンの枠に選手を置く。
+   *   - 同じデッキの別の枠にいる選手なら、2つの枠を入れ替える(背番号は選手と一緒に動く)
+   *   - それ以外の選手なら、今その枠にいる選手と交代する(背番号は枠の番号を引き継ぐ。空き枠なら空いている一番小さい番号)
+   *   - playerCharacterId に null を渡すと枠を空ける(試合に出ない枠だけ)
+   * 本来のポジションと違う枠にも置ける(試合ではステータスが OFF_POSITION_RATE 倍になる)。
+   * @returns {Promise<lineup>} 変更後の編成(getLineup と同じ形)
+   */
+  function setLineupMember(slotKey, playerCharacterId) {
+    return load().then(d => {
+      const team = requireLineupDeck(d);
+      const def = DECK_SLOTS.find(s => s.key === slotKey);
+      if (!def) throw new Error('デッキの枠 "' + slotKey + '" はありません');
+      const members = {};
+      const current = deckMembers(d, team.deckId);
+      DECK_SLOTS.forEach(s => { members[s.key] = current[s.key] ? Object.assign({}, current[s.key]) : null; });
+      const required = Object.keys(team.deckSlots).some(slot => team.deckSlots[slot] === def.key);
+
+      if (playerCharacterId == null) {
+        if (required) throw new Error(def.label + 'は試合に出る枠なので空けられません');
+        members[def.key] = null;
+      } else {
+        const row = requireOwned(d, playerCharacterId);
+        const id = row.player_character_id;
+        const from = DECK_SLOTS.find(s => members[s.key] && members[s.key].playerCharacterId === id);
+        if (from && from.key === def.key) return buildLineup(d);
+        if (from) {
+          // 入れ替え。動かした先が空き枠で、元の枠が試合に出る枠なら空けられない
+          const fromRequired = Object.keys(team.deckSlots).some(slot => team.deckSlots[slot] === from.key);
+          if (!members[def.key] && fromRequired) throw new Error(from.label + 'は試合に出る枠なので空けられません');
+          const tmp = members[def.key];
+          members[def.key] = members[from.key];
+          members[from.key] = tmp;
+        } else if (members[def.key]) {
+          members[def.key] = { playerCharacterId: id, number: members[def.key].number };
+        } else {
+          const used = new Set(DECK_SLOTS.map(s => members[s.key] && members[s.key].number).filter(Boolean));
+          let number = 1;
+          while (used.has(number)) number++;
+          members[def.key] = { playerCharacterId: id, number: number };
+        }
+      }
+      d.progress.decks[team.deckId] = members;
+      return save(d).then(() => buildLineup(d));
+    });
+  }
+
   // ---------- プレイヤー ----------
 
   /**
@@ -845,7 +1051,7 @@
       if (!ids.length) throw new Error('売却する選手を選んでください');
       const rows = ids.map(id => requireOwned(d, id));
       rows.forEach(row => {
-        if (d.deckIds.has(row.player_character_id)) {
+        if (deckLockedIds(d).has(row.player_character_id)) {
           throw new Error(d.master.get(row.character_id).name + 'はデッキに入っているので売却できません');
         }
       });
@@ -899,6 +1105,9 @@
     getOwnedCharacters: getOwnedCharacters,
     getOwnedCharacter: getOwnedCharacter,
     sellCharacters: sellCharacters,
+    getLineup: getLineup,
+    setLineupMember: setLineupMember,
+    DECK_SLOTS: DECK_SLOTS,
     getItems: getItems,
     getShopItems: getShopItems,
     buyShopItem: buyShopItem,

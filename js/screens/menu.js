@@ -32,7 +32,7 @@
       id: 'team', label: 'チーム', en: 'TEAM', title: 'チーム',
       items: [
         // スタメン設定でフォーメーション(ポジション配置)もまとめて決める
-        { id: 'lineup', label: 'スタメン設定', en: 'LINEUP' },
+        { id: 'lineup', label: 'スタメン設定', en: 'LINEUP', screen: 'lineup' },
         { id: 'roster', label: '選手一覧', en: 'ROSTER', screen: 'roster' },
         { id: 'training', label: '選手育成', en: 'TRAINING', screen: 'training' }
       ]

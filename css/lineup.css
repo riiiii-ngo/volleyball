@@ -1,0 +1,108 @@
+/* スタメン設定画面(共通部分は roster.css / training.css) */
+.lineup-list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: var(--content-max, 560px);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.lineup-list li { animation: item-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.lineup-slot {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 22px 8px 12px;
+  border: 0;
+  border-left: 4px solid var(--orange);
+  background: var(--navy-850);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.lineup-slot:active { transform: scale(0.98); }
+.lineup-slot:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--yellow); }
+.lineup-slot.is-bench { border-left-color: var(--navy-700); }
+.lineup-slot-head { flex: none; width: 4.6em; display: flex; flex-direction: column; }
+.lineup-slot-label { font-family: var(--font-en); font-size: 24px; line-height: 1; color: var(--orange); }
+.lineup-slot.is-bench .lineup-slot-label { color: var(--navy-300); }
+.lineup-slot-role { font-size: 10px; font-weight: 700; color: var(--navy-300); }
+.lineup-slot-number { flex: none; width: 1.4em; font-family: var(--font-en); font-size: 30px; line-height: 1; text-align: center; color: #fff; }
+.lineup-slot-main, .lineup-pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lineup-slot-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.lineup-slot-name .gacha-stars { flex: none; font-size: 10px; letter-spacing: 0; }
+.lineup-slot-name b { font-size: 16px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lineup-slot-info { font-family: var(--font-en); font-size: 13px; color: var(--navy-300); display: flex; align-items: center; gap: 8px; }
+.lineup-ok, .lineup-off { font-family: var(--font-label); font-size: 10px; font-weight: 900; padding: 1px 6px; }
+.lineup-ok { color: var(--navy-300); border: 1px solid var(--navy-700); }
+.lineup-off { color: #fff; background: #c2412d; }
+.lineup-slot .roster-pos { font-size: 16px; }
+.lineup-slot-empty { flex: 1; font-size: 13px; font-weight: 700; color: var(--navy-300); }
+
+/* 選手を選ぶ(重ねて表示) */
+.lineup-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 13, 36, 0.78);
+  animation: screen-in 0.18s ease both;
+}
+/* 画面上部の共通ヘッダーの下から重ねる(ヘッダーの方が手前に描かれるため) */
+body.has-header .lineup-picker { top: calc(var(--header-h) + 2px + env(safe-area-inset-top)); }
+.lineup-picker-card {
+  width: 100%;
+  max-width: 480px;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 14px 16px 16px;
+  background: var(--navy-850);
+  border-top: 3px solid var(--orange);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%);
+}
+.lineup-picker-title { flex: none; margin: 0 0 10px; font-size: 14px; font-weight: 900; color: var(--navy-300); }
+.lineup-picker-title b { margin-right: 8px; font-family: var(--font-en); font-weight: normal; font-size: 22px; color: var(--orange); }
+.lineup-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.lineup-pick {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  background: var(--navy-900);
+  text-align: left;
+  cursor: pointer;
+}
+.lineup-pick:hover:not(:disabled) { background: var(--navy-700); }
+.lineup-pick:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
+.lineup-pick:disabled { opacity: 0.5; cursor: default; }
+.lineup-pick .roster-pos { font-size: 14px; min-width: 2.2em; padding: 3px 8px 1px; }
+.lineup-pick-tag { flex: none; font-size: 10px; font-weight: 900; color: var(--yellow); }
+.lineup-picker .training-actions { flex: none; }
+.lineup-picker .training-btn { height: 44px; font-size: 14px; }
+
+@media (orientation: landscape) {
+  .lineup-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lineup-list li { animation: none; }
+}

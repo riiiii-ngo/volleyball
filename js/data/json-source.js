@@ -34,6 +34,9 @@
     }
   ];
 
+  // party_deck_members の枠(<枠>_player_character_id / <枠>_uniform_number)
+  const DECK_SLOT_KEYS = ['ws1', 'ws2', 'mb1', 'mb2', 'op', 'se', 'li'];
+
   VolleyballData.registerSource('json', function createJsonSource(options) {
     const baseUrl = options.baseUrl || 'data/';
     let memoryProgress = null; // localStorage が使えない環境(プライベートモード等)ではメモリにだけ持つ
@@ -66,6 +69,9 @@
           return {
             id: t.id,
             name: t.name || (player ? player.player_name : t.id),
+            // 自分のチームはデッキを編成し直せるので、デッキIDと「試合の立ち位置 → デッキの枠」も渡す
+            deckId: t.playerId === PLAYER_ID ? deck.deck_id : null,
+            deckSlots: t.playerId === PLAYER_ID ? Object.assign({}, t.slots) : null,
             members: Object.keys(t.slots).map(slot => {
               const key = t.slots[slot];
               const pc = owned.find(o => o.player_character_id === row[key + '_player_character_id']);
@@ -152,17 +158,21 @@
       loadOwnedCharacters() {
         return Promise.all(['player_characters', 'party_decks', 'party_deck_members'].map(loadTable))
           .then(([rows, decks, members]) => {
-            // 自分のデッキ(全デッキ・全枠)に置かれている所持選手。売却できない。
-            const deckIds = new Set(decks.filter(d => d.player_id === PLAYER_ID).map(d => d.deck_id));
-            const inDeck = [];
-            members.filter(m => deckIds.has(m.deck_id)).forEach(m => Object.keys(m).forEach(k => {
-              if (/_player_character_id$/.test(k) && m[k] != null) inDeck.push(m[k]);
-            }));
+            // 自分のデッキ(初期の編成)。枠ごとに { playerCharacterId, number }(空きは null)
+            const myDecks = decks.filter(d => d.player_id === PLAYER_ID).map(d => {
+              const row = members.find(m => m.deck_id === d.deck_id) || {};
+              const slots = {};
+              DECK_SLOT_KEYS.forEach(k => {
+                const id = row[k + '_player_character_id'];
+                slots[k] = id == null ? null : { playerCharacterId: id, number: row[k + '_uniform_number'] };
+              });
+              return { deckId: d.deck_id, deckNumber: d.deck_number, members: slots };
+            });
             return {
               playerId: PLAYER_ID,
               characters: rows.filter(r => r.player_id === PLAYER_ID),
               maxPlayerCharacterId: rows.reduce((max, r) => Math.max(max, r.player_character_id), 0),
-              deckPlayerCharacterIds: inDeck
+              decks: myDecks
             };
           });
       },

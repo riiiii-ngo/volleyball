@@ -15,6 +15,7 @@ css/roster.css       選手一覧画面(選手育成と共通の部品も含む)
 css/training.css     選手育成画面
 css/gacha.css        ガチャ画面
 css/shop.css         ショップ(アイテム)画面と、選手育成の経験値チケット
+css/lineup.css       スタメン設定画面
 css/header.css       画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)
 data/*.json          マスタ・初期データ。1ファイル=1テーブル(schema/schema.json の形)。characters / players / player_characters / party_decks / party_deck_members / items / shop_items / player_items / gachas / gacha_details
 backup/data_v1/      旧形式のデータ(characters.json / teams.json)。ゲームからは読まない
@@ -33,6 +34,7 @@ js/screens/roster.js 選手一覧画面
 js/screens/training.js 選手育成画面
 js/screens/gacha.js  ガチャ画面(一覧・引く・結果・選手の詳細)
 js/screens/shop.js   ショップ(アイテム)画面
+js/screens/lineup.js スタメン設定画面
 js/screens/header.js VolleyballHeader - 画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)
 js/screens/ui.js     VolleyballUI     - 画面間で共通の表示部品(エスケープ・レベル表示・ポイント表示)
 js/court.js          VolleyballCourt   - コートの3Dモデル(床・ライン・ネット・ポール・アンテナ)
@@ -64,6 +66,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 | `#/training`, `#/training/<所持選手ID>` | 選手育成(チーム > 選手育成)。所持選手の一覧 / ポイント割り振り・経験値チケット | `js/screens/training.js` |
 | `#/gacha`, `#/gacha/<ガチャID>` | ガチャ(ショップ > ガチャ)。開催中の一覧 / 引く画面(結果も同じ画面で表示) | `js/screens/gacha.js` |
 | `#/shop` | ショップのアイテム(ショップ > アイテム)。商品の一覧と購入 | `js/screens/shop.js` |
+| `#/lineup` | スタメン設定(チーム > スタメン設定)。デッキの7枠に選手を置く | `js/screens/lineup.js` |
 
 ```
 タイトル --(タップ / PCは任意のキー)--> メニュー
@@ -95,7 +98,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 | タブ | 項目 |
 |---|---|
 | 試合 | フリー練習(→`#/practice`)、リーグ戦、トーナメント、親善試合、オンライン対戦 |
-| チーム | スタメン設定(フォーメーション/ポジション配置も含む)、選手一覧、選手育成 |
+| チーム | スタメン設定(→`#/lineup`)、選手一覧、選手育成 |
 | ショップ | ガチャ(→`#/gacha`)、アイテム(→`#/shop`)、ユニフォーム |
 | 社交 | フレンド、ランキング、クラブ |
 | その他 | 設定、お知らせ、ヘルプ、タイトルへ |
@@ -131,7 +134,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - データは「マスタ」(キャラクターの初期値・チーム編成・初期の所持選手/所持アイテム。ゲームからは書き換えない)と「セーブ」(所持選手1体ごとのレベル・経験値・育成ポイント・割り振ったステータス、ガチャで獲得した所持選手、アイテムの所持数)の2種類。画面に渡す選手は、所持選手の行のステータスにセーブの割り振り分を足したもの(試合用8項目の`stats`、全10項目の`allStats`)で、`playerCharacterId`・`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`・`team`(自チームでの立ち位置と背番号。控えは`null`)も持つ。同じ選手を2体持っていても、レベル・育成は別々。
 - ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getTeam(id)`/`getPlayer()`(ユーザ名・ダイヤ・コイン)/`getOwnedCharacters()`/`getOwnedCharacter(所持選手ID)`/`reload()`など。書き込み:`allocatePoints(所持選手ID, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)/`useExpTicket(所持選手ID, アイテムID)`/`sellCharacters(所持選手IDの配列)`など。保存先の違いは「ソース」が吸収する。
 - 使うソースは`index.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
-- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], sold: [売却した所持選手ID], items: { [アイテムID]: 所持数 } }`)の7つ。`loadOwnedCharacters()`はデッキに置かれている所持選手のID(`deckPlayerCharacterIds`、売却不可の判定用)も返す。
+- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], sold: [売却した所持選手ID], decks: { [デッキID]: { [枠]: { playerCharacterId, number } } }, items: { [アイテムID]: 所持数 } }`)の7つ。`loadOwnedCharacters()`は自分のデッキの初期の編成(`decks`)も、`loadTeams()`は自チームが使うデッキID(`deckId`)と試合の立ち位置→デッキの枠の対応(`deckSlots`)も返す。
 - 以前のセーブ(キャラID単位の`characters`)は、読み込み時に自チームでその選手を使っている所持選手の分として引き継ぐ(自チームにいない選手の分は捨てる)。
 - ガチャで獲得した所持選手のIDは、全プレイヤーの`player_characters`の最大ID+1から採番する(`loadOwnedCharacters()`の`maxPlayerCharacterId`。以前は自分の行だけで数えていたため、相手プレイヤーの行とIDが重なっていた)。
 - `json`ソースでは、静的ファイルには書き込めないためセーブをブラウザの`localStorage`(キー`volleyball.progress.v1`)に保存する。そのブラウザ・端末の中だけに残り、別の端末とは共有されない。DBソースに切り替えればサーバー側に保存される。
@@ -219,6 +222,14 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - ブロックで決着したラリー(400中):こちらのスパイクがシャットされた26・ブロックアウトにした13、相手のスパイクをシャットした19・ブロックアウトされた26。全体の約2割。
 - 自チームのレシーブの内訳(約700本):前衛レフト/ライト(主にフェイント/インナーのカバー位置から) 各約27%、後衛中央 約17%、後衛レフト 約15%、セッター 約13%。セッターが拾った時は後衛レフト(リベロ 小町)が代わりにトスを上げる。
 - 経緯:精度導入直後は、サーバー兼セッターがコート外に居続けて後衛が2人しかいなかったため勝率約23%。セッターをコートに入れ、前衛もレシーブするようにした後は逆に拾いすぎ(勝率約63%)になったため、相手が守備の隙を狙うようにして約49%に調整。サイドのブロック導入直後は、ブロッカーが1人守備から抜けるだけで得が無く約30%に下がったため、ブロックで塞いだコースを相手が打てないようにして約54%。ブロックの当たり判定を入れた後は約55%。
+
+### スタメン設定(`#/lineup`、`js/screens/lineup.js`)
+- メニューの「チーム > スタメン設定」から開く。自チームが試合で使うデッキ(プレイヤー1の1番デッキ)の7枠を並べる:枠名(WS1/WS2/MB1/MB2/OP/SE/LI)と試合での立ち位置、背番号・レア度・名前・レベル・選手のポジション、ポジション適性(「適正」/「適正外 能力−10%」)。MB2は試合に出ない控えの枠。
+- 枠をタップすると所持選手の一覧を重ねて表示(ポジションが合う選手 → レベルの高い順)。各選手に適性と、別の枠にいる選手には「○○と入れ替え」を表示。選ぶとその枠に置いて保存する(`VolleyballData.setLineupMember(枠, 所持選手ID)`)。「閉じる」・背景タップ・Escで閉じる。
+  - 同じデッキの別の枠にいる選手を選ぶと2つの枠を入れ替える(背番号は選手と一緒に動く)。それ以外の選手は今の選手と交代(背番号は枠の番号を引き継ぐ。空き枠なら空いている一番小さい番号)。
+  - 試合に出ない枠(MB2)だけ「枠を空ける」で空にできる。試合に出る6枠は空けられない。
+- 枠ごとに本来のポジションがあり(WS1/WS2=WS、MB1/MB2=MB、OP、SE、LI)、違うポジションの選手も置けるが、試合ではその選手の試合用ステータス(8項目)が0.9倍になる(`js/data/repository.js`の`OFF_POSITION_RATE`、小数は四捨五入)。選手一覧・選手育成に出るステータスは下げない。
+- 試合の立ち位置とデッキの枠の対応は今まで通り(前衛レフト=WS1、前衛センター=MB1、前衛ライト=OP、後衛=LI・WS2、サーバー=SE)。フリー練習・選手一覧のスタメン表示・売却できない選手(デッキに置かれている選手)は、編成し直したデッキに合わせて変わる。
 
 ### 選手一覧画面(`#/roster`)
 - 所持選手(`player_characters`の初期の所持選手＋ガチャで獲得した選手)をカードで表示(背番号・レア度・名前・ふりがな・ポジション・役割・身長・レベルと経験値バー・10ステータスのバー)。データは`VolleyballData.getOwnedCharacters()`。
@@ -317,9 +328,10 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - データは新しい形(`data/*.json`)になったが、ゲームはまだ一部しか使っていない。`json-source.js`が試合用の形に変換して渡している。
   - 選手のステータスは常にLv1の値(`min_*`)が基準で、レベルが上がっても自動では伸びない(伸びるのは育成ポイントの割り振り分だけ)。`spike`・`stamina`は試合に反映されていない。
   - 育成ポイント(セーブの`points`/`bonus`)を入れる列は`player_characters`にない(割り振った結果は各ステータスの現在値に入る想定)。
-  - スタメン(デッキ)を変える画面はまだ無いので、試合に出るのは`party_deck_members`の初期の6人のまま。
+  - スタメンを変えられるのは試合で使う1番デッキだけ。2番デッキを編集・切り替える画面は無い。背番号は変えられない。
+  - 編成し直したデッキは`json`ソースではセーブ(`localStorage`の`decks`)にだけ入り、`data/party_deck_members.json`には書き込まれない。
   - 有料のガチャ(ダイヤ・コイン・チケット)は一覧に出るが引けない(ボタンが押せず「準備中」と表示)。ダイヤ・コインはヘッダーに`players`の初期値を表示するだけで、増減させる処理(とセーブ)がまだ無い。
-  - ガチャで獲得した選手は`json`ソースではブラウザの`localStorage`にだけ保存され、`data/player_characters.json`には書き込まれない。選手一覧・選手育成には出るが、スタメンにはまだ入れられない。
+  - ガチャで獲得した選手は`json`ソースではブラウザの`localStorage`にだけ保存され、`data/player_characters.json`には書き込まれない。選手一覧・選手育成・スタメン設定に出る。
   - 売却もブラウザ側で行っている。DBに移す時はサーバー側で`player_characters`の行を削除し、アイテムを付与すること。
   - 抽選はブラウザ側で行っている。DBに移す時は不正防止のため、抽選と所持選手の登録をサーバー側に移すこと。
 
@@ -335,6 +347,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 実装・修正を行うたびに、新しい日付のものを上に追記していく。
 
 ### 2026-10-08
+- スタメン設定を追加(`#/lineup`、`js/screens/lineup.js`、`css/lineup.css`)。メニューの「チーム > スタメン設定」から、試合で使うデッキの7枠に所持選手を置ける(別の枠の選手を選ぶと入れ替え、MB2だけ空けられる)。本来のポジションと違う枠にも置けるが、試合ではステータスが0.9倍になる。編成はセーブの`decks`に保存。データ窓口に`getLineup`/`setLineupMember`を追加し、試合のチーム(`getTeam('player')`)・選手一覧の役割・売却の可否を、編成し直したデッキから作るようにした。ソースの`loadOwnedCharacters()`は`deckPlayerCharacterIds`の代わりにデッキの初期の編成(`decks`)を返す。ヘッドレスChromeで、LIに控えの桐生(WS)を置くと「適正外」で背番号2を引き継ぐ、WS1に大鷹(MB1)を選ぶと入れ替わって背番号も動く、MB2を空けられて試合に出る枠は空けられない、試合のチームでは適正外の選手のスピードが60→54・48→43、外れた小町・高城は売却できるようになる、リロード後も残る、フリー練習が新しい編成で始まることを確認。
 - 一括レベルアップを追加。選手育成の割り振り画面で目標レベルを選ぶと、使う経験値チケットの枚数を計算して表示し、まとめて使える。チケットが複数種類ある時は経験値の多い(レベルの高い)チケットを優先し、必要経験値の合計に近くなるように枚数を決める。データ窓口に`planLevelUp`/`levelUpWithTickets`、成長ルールに`expToReach`/`planExpTickets`を追加。あわせて、割り振りの「リセット」「決定」ボタンの取得を画面内の別ボタンと取り違えないようにした。Nodeで計画の計算を確認(必要100→50×2、必要1,620で50×99/250×9/1,000×9→1,000×1・250×2・50×3、50×1/250×9→250×7、必要260で250×1/1,000×1→1,000×1、足りなければ不可)。ヘッドレスChromeで、Lv1チケット40枚でMAXがLv11・38枚、Lv10なら33枚(+1,650)、3種類(Lv2・Lv3を仮に追加)でLv10まで1,000×1・250×2・50×3を使って所持数が減ること、一括レベルアップ後もステータスの割り振りが動くことを確認。
 - 経験値チケットLv1の経験値を15から50に変更(`data/items.json`の`effect_value`)。Lv2まで2枚、Lv10まで33枚、Lv50まで569枚。上位のチケット(Lv2など)を後で追加する前提。ヘッドレスChromeで、ショップ・選手育成の表示が「経験値+50」になり、2枚でLv1→Lv2になることを確認。
 - 選手マスタ(`characters`)からステータスの最大値(`max_*`の10列)を削除(`data/characters.json`と`schema/`の3ファイル)。Lv1(獲得時)の値`min_*`は名前を変えずに残した。
