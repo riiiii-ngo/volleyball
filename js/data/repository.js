@@ -495,7 +495,8 @@
   }
 
   /**
-   * 育成ポイントをステータスに割り振る。
+   * 育成ポイントをステータスに割り振る。上げるのに使うポイントは、そのステータスを育成で上げた回数に応じて
+   * 段階的に増える(VolleyballProgression.statUpCost)。
    * @param {number} playerCharacterId - 所持選手ID
    * @param {Object<string, number>} allocation - 例 { speed: 2, receive: 1 }(上げる量)
    * @returns {Promise<character>} 割り振り後の選手
@@ -511,7 +512,7 @@
         if (clampStat(row[s.key]) + (p.bonus[s.key] || 0) + add > STAT_MAX) {
           throw new Error(s.label + 'は' + STAT_MAX + 'より上げられません');
         }
-        total += add;
+        total += VolleyballProgression.statUpTotalCost(p.bonus[s.key] || 0, add);
       });
       if (total > p.points) throw new Error('育成ポイントが足りません');
       STATS.forEach(s => {

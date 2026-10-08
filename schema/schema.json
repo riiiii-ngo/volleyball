@@ -74,7 +74,7 @@
 
     "characters": {
       "title": "選手情報マスタ",
-      "description": "各ステータスはLv1の値(min_*)と最大Lvの値(max_*)を持つ。min_* <= max_*。",
+      "description": "各ステータスはLv1(獲得時)の値(min_*)だけを持つ。上限値(最大Lvの値)は持たない。",
       "x-table": "characters",
       "x-primaryKey": ["character_id"],
       "type": "object",
@@ -87,32 +87,20 @@
         "rarity": { "type": "integer", "minimum": 1, "maximum": 5, "x-dbType": "SMALLINT", "description": "レア度(1〜5)" },
         "height": { "type": "integer", "minimum": 100, "maximum": 250, "x-dbType": "SMALLINT", "description": "身長(cm)" },
         "min_spike": { "$ref": "#/$defs/stat", "description": "Lv1のスパイク" },
-        "max_spike": { "$ref": "#/$defs/stat", "description": "最大Lvのスパイク" },
         "min_receive": { "$ref": "#/$defs/stat", "description": "Lv1のレシーブ" },
-        "max_receive": { "$ref": "#/$defs/stat", "description": "最大Lvのレシーブ" },
         "min_block": { "$ref": "#/$defs/stat", "description": "Lv1のブロック" },
-        "max_block": { "$ref": "#/$defs/stat", "description": "最大Lvのブロック" },
         "min_toss": { "$ref": "#/$defs/stat", "description": "Lv1のトス" },
-        "max_toss": { "$ref": "#/$defs/stat", "description": "最大Lvのトス" },
         "min_serve": { "$ref": "#/$defs/stat", "description": "Lv1のサーブ" },
-        "max_serve": { "$ref": "#/$defs/stat", "description": "最大Lvのサーブ" },
         "min_power": { "$ref": "#/$defs/stat", "description": "Lv1のパワー" },
-        "max_power": { "$ref": "#/$defs/stat", "description": "最大Lvのパワー" },
         "min_speed": { "$ref": "#/$defs/stat", "description": "Lv1のスピード" },
-        "max_speed": { "$ref": "#/$defs/stat", "description": "最大Lvのスピード" },
         "min_stamina": { "$ref": "#/$defs/stat", "description": "Lv1のスタミナ" },
-        "max_stamina": { "$ref": "#/$defs/stat", "description": "最大Lvのスタミナ" },
         "min_jump": { "$ref": "#/$defs/stat", "description": "Lv1のジャンプ" },
-        "max_jump": { "$ref": "#/$defs/stat", "description": "最大Lvのジャンプ" },
-        "min_technique": { "$ref": "#/$defs/stat", "description": "Lv1のテクニック" },
-        "max_technique": { "$ref": "#/$defs/stat", "description": "最大Lvのテクニック" }
+        "min_technique": { "$ref": "#/$defs/stat", "description": "Lv1のテクニック" }
       },
       "required": [
         "character_id", "name", "kana_name", "romaji_name", "position", "rarity", "height",
-        "min_spike", "max_spike", "min_receive", "max_receive", "min_block", "max_block",
-        "min_toss", "max_toss", "min_serve", "max_serve", "min_power", "max_power",
-        "min_speed", "max_speed", "min_stamina", "max_stamina",
-        "min_jump", "max_jump", "min_technique", "max_technique"
+        "min_spike", "min_receive", "min_block", "min_toss", "min_serve",
+        "min_power", "min_speed", "min_stamina", "min_jump", "min_technique"
       ],
       "additionalProperties": false
     },

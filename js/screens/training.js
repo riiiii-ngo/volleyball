@@ -4,6 +4,7 @@
  *   #/training/<所持選手ID>    その選手の育成ポイントをステータスに割り振る
  * レベル・育成は所持選手1体(player_character_id)ごと。
  * 割り振りは「＋/−」で仮決めし、「決定」で VolleyballData.allocatePoints() に保存する。
+ * 1上げるのに使うポイントは、そのステータスを育成で上げた回数に応じて段階的に増える(VolleyballProgression.statUpCost)。
  * 保存済みの割り振りは戻せない(−は今回仮決めした分だけ)。
  * 割り振り画面では、所持している経験値チケットを使ってレベルを上げられる(VolleyballData.useExpTicket())。
  */
@@ -70,9 +71,15 @@
       return Object.keys(pending).reduce((sum, k) => sum + pending[k], 0);
     }
 
+    // 仮決めしている分に使うポイント
+    function pendingCost() {
+      return Object.keys(pending).reduce((sum, k) =>
+        sum + VolleyballProgression.statUpTotalCost(character.bonus[k] || 0, pending[k]), 0);
+    }
+
     function draw() {
       const c = character;
-      const left = c.points - pendingTotal();
+      const left = c.points - pendingCost();
       headingJa.textContent = c.name;
       content.innerHTML =
         '<div class="training-panel">' +
@@ -82,10 +89,14 @@
           '</div>' +
           ticketsHtml(c) +
           '<p class="training-left">育成ポイント <b class="' + (left > 0 ? 'has-points' : '') + '">' + left + '</b> / ' + c.points + '</p>' +
+          '<p class="training-hint">1上げるのに使うポイントは、育成で上げた回数に応じて増えます(' +
+            VolleyballProgression.COST_STEP + '回ごとに+1pt)。</p>' +
           '<ul class="training-stats">' + VolleyballData.STATS.map(s => {
             const add = pending[s.key] || 0;
             const v = c.stats[s.key];
-            const canUp = left > 0 && v + add < VolleyballData.STAT_MAX;
+            const isMax = v + add >= VolleyballData.STAT_MAX;
+            const cost = VolleyballProgression.statUpCost(c.bonus[s.key] + add); // 次の+1に使うポイント
+            const canUp = !isMax && left >= cost;
             return '<li class="training-stat">' +
               '<span class="roster-stat-label">' + s.label + '</span>' +
               '<span class="training-stat-bar">' +
@@ -94,12 +105,15 @@
                 '<span class="is-pending" style="width:' + add + '%"></span>' +
               '</span>' +
               '<span class="training-stat-value' + (add ? ' is-changed' : '') + '">' + (v + add) + '</span>' +
+              '<span class="training-stat-cost' + (cost > 1 ? ' is-up' : '') + '" title="次に1上げるのに使うポイント">' +
+                (isMax ? 'MAX' : cost + '<small>pt</small>') + '</span>' +
               '<button type="button" class="training-step" data-stat="' + s.key + '" data-step="-1"' + (add > 0 ? '' : ' disabled') + ' aria-label="' + s.label + 'を下げる">−</button>' +
               '<button type="button" class="training-step" data-stat="' + s.key + '" data-step="1"' + (canUp ? '' : ' disabled') + ' aria-label="' + s.label + 'を上げる">＋</button>' +
             '</li>';
           }).join('') + '</ul>' +
           (c.points === 0
-            ? '<p class="training-hint">育成ポイントがありません。フリー練習でレベルを上げましょう。</p>'
+            ? '<p class="training-hint">育成ポイントがありません。経験値チケットでレベルを上げましょう(レベルが1上がるごとに' +
+              VolleyballProgression.POINTS_PER_LEVEL + 'pt)。</p>'
             : '') +
           '<div class="training-actions">' +
             '<button type="button" class="training-btn is-reset"' + (pendingTotal() ? '' : ' disabled') + '>リセット</button>' +

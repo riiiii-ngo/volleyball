@@ -22,25 +22,15 @@ CREATE TABLE characters (
     rarity        SMALLINT     NOT NULL CHECK (rarity BETWEEN 1 AND 5),
     height        SMALLINT     NOT NULL CHECK (height BETWEEN 100 AND 250),  -- cm
     min_spike     INTEGER NOT NULL CHECK (min_spike   >= 0),
-    max_spike     INTEGER NOT NULL CHECK (max_spike   >= min_spike),
     min_receive   INTEGER NOT NULL CHECK (min_receive >= 0),
-    max_receive   INTEGER NOT NULL CHECK (max_receive >= min_receive),
     min_block     INTEGER NOT NULL CHECK (min_block   >= 0),
-    max_block     INTEGER NOT NULL CHECK (max_block   >= min_block),
     min_toss      INTEGER NOT NULL CHECK (min_toss    >= 0),
-    max_toss      INTEGER NOT NULL CHECK (max_toss    >= min_toss),
     min_serve     INTEGER NOT NULL CHECK (min_serve   >= 0),
-    max_serve     INTEGER NOT NULL CHECK (max_serve   >= min_serve),
     min_power     INTEGER NOT NULL CHECK (min_power   >= 0),
-    max_power     INTEGER NOT NULL CHECK (max_power   >= min_power),
     min_speed     INTEGER NOT NULL CHECK (min_speed   >= 0),
-    max_speed     INTEGER NOT NULL CHECK (max_speed   >= min_speed),
     min_stamina   INTEGER NOT NULL CHECK (min_stamina >= 0),
-    max_stamina   INTEGER NOT NULL CHECK (max_stamina >= min_stamina),
     min_jump      INTEGER NOT NULL CHECK (min_jump    >= 0),
-    max_jump      INTEGER NOT NULL CHECK (max_jump    >= min_jump),
-    min_technique INTEGER NOT NULL CHECK (min_technique >= 0),
-    max_technique INTEGER NOT NULL CHECK (max_technique >= min_technique)
+    min_technique INTEGER NOT NULL CHECK (min_technique >= 0)
 );
 
 -- 3. アイテム情報マスタ

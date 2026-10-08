@@ -36,7 +36,7 @@ export interface Player {
   coins: number;
 }
 
-/** 2. 選手情報マスタ(min_* = Lv1, max_* = 最大Lv) */
+/** 2. 選手情報マスタ(min_* = Lv1(獲得時)の値。上限値は持たない) */
 export interface Character {
   character_id: MasterId; // PK
   name: string;
@@ -46,25 +46,15 @@ export interface Character {
   rarity: 1 | 2 | 3 | 4 | 5;
   height: number; // cm
   min_spike: number;
-  max_spike: number;
   min_receive: number;
-  max_receive: number;
   min_block: number;
-  max_block: number;
   min_toss: number;
-  max_toss: number;
   min_serve: number;
-  max_serve: number;
   min_power: number;
-  max_power: number;
   min_speed: number;
-  max_speed: number;
   min_stamina: number;
-  max_stamina: number;
   min_jump: number;
-  max_jump: number;
   min_technique: number;
-  max_technique: number;
 }
 
 /** 3. アイテム情報マスタ */

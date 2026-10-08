@@ -74,7 +74,7 @@
 }
 .training-stat {
   display: grid;
-  grid-template-columns: 5.4em 1fr 2.2em 40px 40px;
+  grid-template-columns: 5.4em 1fr 2.2em 2.6em 40px 40px;
   align-items: center;
   gap: 10px;
   font-size: 12px;
@@ -100,6 +100,16 @@
   color: #fff;
 }
 .training-stat-value.is-changed { color: var(--yellow); }
+/* 次に1上げるのに使うポイント(2pt以上はオレンジ) */
+.training-stat-cost {
+  font-family: var(--font-en);
+  font-size: 15px;
+  line-height: 1;
+  text-align: right;
+  color: var(--navy-300);
+}
+.training-stat-cost small { font-size: 10px; margin-left: 1px; }
+.training-stat-cost.is-up { color: var(--orange); }
 .training-step {
   height: 36px;
   padding: 0;
