@@ -1,4 +1,4 @@
-/* フリー練習(コート)画面：3D描画の土台、ジョイスティック、サーブ/レシーブ/戻るボタン */
+/* フリー練習(コート)画面：3D描画の土台、ジョイスティック、サーブ/戻るボタン、スコア、試合結果 */
 .court-screen { background: #05070a; }
 .court-view { position: absolute; inset: 0; }
 .court-view canvas { display: block; }
@@ -44,6 +44,37 @@
 .vb-joystick-zone-active {
   background: rgba(255, 106, 0, 0.30);
 }
+/* トス方向の名前(レフト/クイック/ライト…)。選べないゾーンは暗くする */
+.vb-joystick-zone-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18%;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.vb-joystick-zone-disabled { background: rgba(0, 0, 0, 0.35); }
+.vb-joystick-zone-disabled .vb-joystick-zone-label { color: rgba(255, 255, 255, 0.35); }
+.vb-joystick-caption {
+  position: fixed;
+  left: 50%;
+  bottom: calc(max(28px, env(safe-area-inset-bottom, 28px)) + 140px);
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(7, 13, 36, 0.82);
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: pre;
+  pointer-events: none;
+  z-index: 10;
+}
+.vb-joystick-caption[hidden] { display: none; }
 .vb-joystick-knob {
   position: absolute;
   left: 50%;
@@ -78,33 +109,6 @@
   filter: brightness(0.85);
 }
 .vb-serve-btn:disabled {
-  filter: grayscale(0.6) brightness(0.7);
-}
-
-.vb-receive-btn {
-  position: fixed;
-  right: 26px;
-  bottom: max(148px, calc(env(safe-area-inset-bottom, 0px) + 148px));
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #5fb8ff, #1a6fd1 70%);
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
-  color: #fff;
-  font-size: 15px;
-  font-weight: bold;
-  font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
-  letter-spacing: 2px;
-  padding: 0;
-  white-space: nowrap;
-  touch-action: manipulation;
-  z-index: 10;
-}
-.vb-receive-btn:active {
-  filter: brightness(0.85);
-}
-.vb-receive-btn:disabled {
   filter: grayscale(0.6) brightness(0.7);
 }
 
@@ -171,6 +175,97 @@
   letter-spacing: 0.2em;
   color: var(--yellow);
 }
+/* 取ったセット数(得点の外側)とサーブ権(サーブを打つ側の得点の横に●) */
+.court-score-sets {
+  font-family: var(--font-en);
+  font-size: 18px;
+  color: var(--navy-300);
+}
+.court-score-num { position: relative; }
+.court-score-num.is-serving::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+.court-score-num.is-near.is-serving::after { left: -6px; }
+.court-score-num.is-far.is-serving::after { right: -6px; }
+.court-score-setno {
+  width: 2.2em;
+  font-family: var(--font-en);
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  color: var(--navy-300);
+}
+
+/* セットの終わり・試合結果 */
+.court-banner {
+  position: fixed;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  padding: 10px 28px;
+  background: rgba(7, 13, 36, 0.88);
+  clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+  color: #fff;
+  text-align: center;
+  font-family: var(--font-en);
+  font-size: 26px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 11;
+}
+.court-banner[hidden] { display: none; }
+.court-result {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 7, 10, 0.72);
+  z-index: 12;
+}
+.court-result[hidden] { display: none; }
+.court-result-box {
+  width: min(320px, calc(100% - 32px));
+  padding: 22px 20px 18px;
+  background: var(--navy-900, #0b1430);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  text-align: center;
+}
+.court-result-title {
+  margin: 0 0 6px;
+  font-family: var(--font-en);
+  font-size: 40px;
+  letter-spacing: 0.12em;
+}
+.court-result-title.is-win { color: var(--orange); }
+.court-result-sets {
+  margin: 0 0 16px;
+  font-family: var(--font-en);
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  color: var(--navy-300);
+}
+.court-result-buttons { display: flex; gap: 10px; }
+.court-result-buttons button {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.court-result-again { background: var(--orange); color: #fff; }
+.court-result-menu { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
 /* スコアの下に「‹ メニュー」が重ならない幅を確保できない狭い画面ではチーム名を隠す */
 @media (max-width: 420px) {
   .court-score-team { display: none; }

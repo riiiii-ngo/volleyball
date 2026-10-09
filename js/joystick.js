@@ -29,9 +29,16 @@
       const zone = document.createElement('div');
       zone.className = 'vb-joystick-zone vb-joystick-zone-' + name;
       zone.style.left = (i * (100 / 3)) + '%';
+      const label = document.createElement('span');
+      label.className = 'vb-joystick-zone-label';
+      zone.appendChild(label);
       base.appendChild(zone);
       zoneEls[name] = zone;
     });
+    // トス方向を選んでいる間だけ台座の上に出す見出し(パスの質など)
+    const caption = document.createElement('div');
+    caption.className = 'vb-joystick-caption';
+    caption.hidden = true;
 
     const knob = document.createElement('div');
     knob.className = 'vb-joystick-knob';
@@ -40,6 +47,7 @@
     base.appendChild(knob);
 
     opt.parent.appendChild(base);
+    opt.parent.appendChild(caption);
 
     const radius = opt.size / 2;
     const maxOffset = radius - opt.knobSize / 2;
@@ -100,15 +108,36 @@
       });
     }
 
+    // ゾーンごとの名前と選べるかどうか。zones: { left|center|right: { label, enabled } } / null で消す
+    let lastZonesKey = '';
+    function setZones(zones) {
+      const key = zones ? zoneNames.map(n => zones[n].label + zones[n].enabled).join('|') : '';
+      if (key === lastZonesKey) return;
+      lastZonesKey = key;
+      zoneNames.forEach(name => {
+        const z = zones && zones[name];
+        zoneEls[name].firstChild.textContent = z ? z.label : '';
+        zoneEls[name].classList.toggle('vb-joystick-zone-disabled', !!z && !z.enabled);
+      });
+    }
+
+    function setCaption(text) {
+      caption.hidden = !text;
+      if (caption.textContent !== (text || '')) caption.textContent = text || '';
+    }
+
     function destroy() {
       reset();
       base.remove(); // リスナーは base 自身に付いているので要素ごと破棄される
+      caption.remove();
     }
 
     return {
       element: base,
       get value() { return { x: value.x, y: value.y }; },
       setActiveZone: setActiveZone,
+      setZones: setZones,
+      setCaption: setCaption,
       destroy: destroy
     };
   }

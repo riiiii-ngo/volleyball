@@ -65,7 +65,7 @@
         const rate = lineup.offPositionRate;
         content.innerHTML =
           '<p class="training-hint">枠をタップして選手を選びます。本来のポジションと違う枠にも置けますが、試合ではステータスが' +
-            percentDown(rate) + '下がります。MB2は試合に出ない控えの枠です。</p>' +
+            percentDown(rate) + '下がります。7枠とも試合に出ます(リベロは後衛のMBと交代で入ります)。</p>' +
           '<ul class="lineup-list">' + lineup.slots.map((s, i) => slotHtml(s, i, rate)).join('') + '</ul>';
         content.querySelectorAll('.lineup-slot').forEach(btn => {
           btn.addEventListener('click', () => openPicker(lineup.slots.find(s => s.key === btn.dataset.key)));

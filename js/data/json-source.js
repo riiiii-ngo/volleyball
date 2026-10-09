@@ -21,21 +21,17 @@
   const PROGRESS_KEY = 'volleyball.progress.v1';
   const PLAYER_ID = 1; // 操作しているプレイヤー(players.player_id)
 
-  // 試合で使うチーム。どのプレイヤーのどのデッキか、試合の立ち位置(slot)にデッキのどの枠を置くか。
-  // 試合はまだ6人制の立ち位置だけなので、使わない枠(MB2 など)は無視する。
-  const GAME_TEAMS = [
-    {
-      id: 'player', name: 'マイチーム', playerId: PLAYER_ID, deckNumber: 1,
-      slots: { 'front-1': 'ws1', 'front-2': 'mb1', 'front-3': 'op', 'back-1': 'li', 'back-2': 'ws2', 'server': 'se' }
-    },
-    {
-      id: 'cpu', name: null /* プレイヤー名を使う */, playerId: 2, deckNumber: 1,
-      slots: { 'front-1': 'ws1', 'front-2': 'se', 'front-3': 'mb1', 'back-1': 'ws2', 'back-2': 'li', 'back-3': 'op' }
-    }
-  ];
-
   // party_deck_members の枠(<枠>_player_character_id / <枠>_uniform_number)
   const DECK_SLOT_KEYS = ['ws1', 'ws2', 'mb1', 'mb2', 'op', 'se', 'li'];
+
+  // 試合で使うチーム。どのプレイヤーのどのデッキか、試合の立ち位置(slot)にデッキのどの枠を置くか。
+  // 試合はデッキの7枠(6人+リベロ)をそのまま使う。立ち位置の名前は枠と同じ(役割とサーブ順は VolleyballGame が決める)。
+  const ALL_SLOTS = {};
+  DECK_SLOT_KEYS.forEach(k => { ALL_SLOTS[k] = k; });
+  const GAME_TEAMS = [
+    { id: 'player', name: 'マイチーム', playerId: PLAYER_ID, deckNumber: 1, slots: ALL_SLOTS },
+    { id: 'cpu', name: null /* プレイヤー名を使う */, playerId: 2, deckNumber: 1, slots: ALL_SLOTS }
+  ];
 
   VolleyballData.registerSource('json', function createJsonSource(options) {
     const baseUrl = options.baseUrl || 'data/';
@@ -72,6 +68,7 @@
             // 自分のチームはデッキを編成し直せるので、デッキIDと「試合の立ち位置 → デッキの枠」も渡す
             deckId: t.playerId === PLAYER_ID ? deck.deck_id : null,
             deckSlots: t.playerId === PLAYER_ID ? Object.assign({}, t.slots) : null,
+            rotationStart: row.rotation_start_position || 1, // セッターの最初のローテーションの位置
             members: Object.keys(t.slots).map(slot => {
               const key = t.slots[slot];
               const pc = owned.find(o => o.player_character_id === row[key + '_player_character_id']);

@@ -1,17 +1,20 @@
 /**
  * VolleyballStats
- * キャラクターのステータス(1〜99)を、試合シミュレーションが使う物理量に変換する。
+ * キャラクターのステータス(1〜99)と身長を、試合シミュレーションが使う物理量に変換する。
  * 「ステータスがどれだけ試合に効くか」の調整はこのファイルだけで行う。
  *
- * 係数は、初期キャラ(ステータス40〜80程度)同士の試合で、コート内に落ちたスパイクを
- * 拾える率が相手・自チームとも7割弱になるように調整した(400ラリーの早送りで計測)。
- * パワーは効きすぎると全員のスパイクが速くなり誰も拾えなくなるので、効果を小さめにしている。
+ * 速さ・高さは実際のバレーボール(高校〜大学男子)に近い値にしている。
+ *   - 移動: 3.4〜5.4 m/秒(短い距離のダッシュ)
+ *   - 最高到達点: 指高(身長×1.33)+ジャンプ(0.45〜1.05m)。身長180cm・ジャンプ50で約3.14m
+ *   - スパイク: 初速 19〜31 m/秒、サーブ: フローター 15〜21 m/秒 / ジャンプサーブ 20〜30 m/秒
  * 狙いの正確さは「ブレの標準偏差(m)」で表し、ステータスが高いほど小さい(狙った所に行く)。
- * block はブロックで塞げる幅と、ブロックに当たった時の結果(シャット/ワンタッチ)に効く。
- * power はスパイクの速さに加え、ブロックに当たった時に打ち勝つ(ブロックアウト)力にも効く。
+ * block はブロックで塞げる幅・ブロックの高さ・当たった時の結果に、power はスパイクの速さと
+ * ブロックに打ち勝つ力(ブロックアウト)に効く。
  */
 (function (global) {
   'use strict';
+
+  const DEFAULT_HEIGHT_CM = 180;
 
   function stat(stats, key) {
     const v = stats && stats[key];
@@ -20,27 +23,36 @@
 
   /**
    * @param {Object|null} stats - { speed, jump, power, receive, block, toss, serve, technique }
-   * @returns {{speed:number, reach:number, jumpHeight:number, spikeTime:number, serveTime:number,
-   *            spikeError:number, serveError:number, passError:number, tossError:number,
-   *            blockReach:number, blockPower:number, attackPower:number}}
+   * @param {number|null} [heightCm] - 身長(cm)。省略時は180
    */
-  function toPlayParams(stats) {
+  function toPlayParams(stats, heightCm) {
+    const height = (typeof heightCm === 'number' && heightCm > 0 ? heightCm : DEFAULT_HEIGHT_CM) / 100;
+    const standingReach = height * 1.33;                     // 指高(m)  180cm→2.39
+    const jump = 0.45 + stat(stats, 'jump') * 0.006;         // 垂直跳び(m) 50→0.75 / 90→0.99
+    const serve = stat(stats, 'serve');
+    const power = stat(stats, 'power');
+    // サーブとパワーが高い選手はジャンプサーブ、それ以外はフローター
+    const jumpServe = serve + power >= 130;
     return {
-      speed: 2.6 + stat(stats, 'speed') * 0.02,           // 移動速度(m/秒)  50→3.6 / 75→4.1
-      reach: 0.55 + stat(stats, 'receive') * 0.005,       // 飛びつける距離(m) 50→0.8 / 85→0.98
-      jumpHeight: 0.3 + stat(stats, 'jump') * 0.005,      // スパイクのジャンプ高さ(m) 50→0.55
-      spikeTime: 1.0 - stat(stats, 'power') * 0.002,      // スパイクの着地までの時間(秒) 50→0.9 / 75→0.85
-      serveTime: 3.1 - stat(stats, 'serve') * 0.01,       // サーブの着地までの時間(秒) 50→2.6 / 70→2.4
+      speed: 3.3 + stat(stats, 'speed') * 0.02,              // 移動速度(m/秒)  50→4.3 / 75→4.8
+      reach: 0.6 + stat(stats, 'receive') * 0.005,           // 飛びつける距離(m) 50→0.85 / 85→1.03
+      jumpHeight: jump,
+      attackReach: standingReach + jump,                     // スパイクの打点(m)  180cm・50→3.14
+      blockTop: standingReach + jump * 0.85 + 0.05,          // ブロックの手の高さ(m)
+      spikeSpeed: 17 + power * 0.14,                         // スパイクの初速(m/秒) 50→24 / 80→28.2
+      jumpServe: jumpServe,
+      serveSpeed: jumpServe ? 14 + (serve + power) / 2 * 0.17 : 13 + serve * 0.08, // 65→25 / 50→17
       // ---- 狙いのブレ(標準偏差, m) ----
-      spikeError: 1.3 - stat(stats, 'technique') * 0.011, // スパイク   50→0.75 / 70→0.53 / 99→0.21
-      serveError: 1.2 - stat(stats, 'serve') * 0.01,      // サーブ     50→0.7  / 70→0.5
-      passError: 1.4 - stat(stats, 'receive') * 0.011,    // レシーブの返球 50→0.85 / 85→0.47
-      tossError: 0.9 - stat(stats, 'toss') * 0.008,       // トス       50→0.5  / 80→0.26
+      spikeError: 1.2 - stat(stats, 'technique') * 0.01,     // スパイク   50→0.7  / 70→0.5 / 99→0.21
+      serveError: 1.1 - serve * 0.009,                       // サーブ     50→0.65 / 70→0.47
+      passError: 1.5 - stat(stats, 'receive') * 0.012,       // レシーブの返球 50→0.9 / 85→0.48
+      tossError: 0.9 - stat(stats, 'toss') * 0.008,          // トス       50→0.5  / 80→0.26
       // ブロックで塞げる幅(ブロッカーの中心から左右それぞれ, m)  50→0.55 / 80→0.7
       blockReach: 0.3 + stat(stats, 'block') * 0.005,
       // ブロックの当たり判定で使う元の値(ブロッカーのブロック値 vs 攻撃者のパワー値)
       blockPower: stat(stats, 'block'),
-      attackPower: stat(stats, 'power')
+      attackPower: power,
+      toss: stat(stats, 'toss')
     };
   }
 

@@ -30,15 +30,15 @@
     return '<span class="gacha-stars is-r' + rarity + '" aria-label="レア度' + rarity + '">' + '★'.repeat(rarity) + '</span>';
   }
 
-  // 試合の立ち位置(slot) → 表示用の役割名
+  // 試合の立ち位置(slot = デッキの枠) → 表示用の役割名(サーブ順: SE→WS1→MB1→OP→WS2→MB2、リベロ)
   const SLOT_LABELS = Object.freeze({
-    'front-1': '前衛レフト',
-    'front-2': '前衛センター',
-    'front-3': '前衛ライト',
-    'back-1': '後衛',
-    'back-2': '後衛',
-    'back-3': '後衛',
-    server: 'サーバー'
+    se: 'セッター',
+    ws1: 'ウイングスパイカー(対角1)',
+    mb1: 'ミドルブロッカー(対角1)',
+    op: 'オポジット',
+    ws2: 'ウイングスパイカー(対角2)',
+    mb2: 'ミドルブロッカー(対角2)',
+    li: 'リベロ'
   });
   const SLOT_ORDER = Object.keys(SLOT_LABELS);
 

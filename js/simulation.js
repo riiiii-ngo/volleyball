@@ -1,101 +1,134 @@
 /**
  * VolleyballSimulation
- * 試合の状態(ボールの飛行、狙い位置、アタッカー/ブロッカーのフェーズ)を
- * 管理する純粋なロジック層。THREE.js のシーングラフやDOMには一切触れない。
+ * 試合の状態(ボールの飛行、12人+リベロの動き、得点・セット・ローテーション)を管理する純粋なロジック層。
+ * THREE.js のシーングラフやDOMには一切触れない。
  *
- * 将来オンライン対戦にする場合は、この層が「権威のある状態」を持つ側
- * (サーバー or ホスト)になり、getState() のスナップショットを相手に送る、
- * applyCommand() で受け取った操作を反映する、という使い方を想定している。
- * チーム編成機能を作る場合も、選手の役割(サーバー/セッター/アタッカー等)を
- * ここに渡す config を差し替えるだけで対応できるようにしてある。
+ * 実際の6人制バレーボールに近づけるため、次のルールで動く。
+ *   - 両チームとも同じ仕組み(近チーム=手前/プレイヤー操作、奥チーム=CPU)。サーブ権・ローテーション・
+ *     得点・セットを管理し、サイドアウトを取ったチームが時計回りにローテーションしてサーブを打つ。
+ *   - 5-1システム: 選手はサーブ順に S(セッター)→OH1→MB1→OP→OH2→MB2。前衛/後衛はローテーションで決まり、
+ *     ラリーが始まると前衛は レフト=OH / センター=MB / ライト=S か OP、後衛は ライト=S か OP / センター=OH /
+ *     レフト=リベロ(MB) の専門の位置へ移る(スイッチ)。リベロは後衛のMBと入れ替わる(MBのサーブの時を除く)。
+ *   - ボールは重力のある放物線(初速と重力)で飛ぶ。ネット(白帯+ボール半径)にかかるとネット、
+ *     アンテナの外を通るとアウト。
+ *   - 1本目(レシーブ・ディグ)の返球のずれでA/B/Cパスが決まり、トスの選択肢が変わる
+ *     (A: クイックを含む全部 / B: サイドとバックアタック / C: 二段トスでサイドの高いトスだけ)。
+ *     セッターが1本目を触った・間に合わない時は、他の選手がアンダーで二段トスを上げる。
+ *   - Aパスの時はMBがクイックに入る(上がらなくてもおとりになる)。CPUのMBは一定の確率でクイックに
+ *     つられて跳び(コミット)、他の攻撃のブロックに遅れる。
+ *   - ブロックはトスが上がってから打点へ走って跳ぶ。打つ瞬間に手がネットの上にあり、コースが手の
+ *     範囲を通り、打球が手より低ければ当たり判定(シャット/ワンタッチ/ブロックアウト)。
+ *   - 守備はブロックに合わせたペリメーター(ストレート・クロス・後ろ・フェイントカバー)。
+ *     自チームが打つ時は残りの選手が打った選手の周りにカバーに入る。
+ *   - 打球が向かってくると、反応時間の後、間に合う選手(ポジションの優先度込み)が落下点へ走る。
+ *     触る高さ(レシーブは腰、トスは頭上)まで落ちてくるまでに飛びつける距離へ入れれば触れる。
+ *
+ * 将来オンライン対戦にする場合は、この層が「権威のある状態」を持つ側(サーバー or ホスト)になり、
+ * getState() のスナップショットを相手に送る、という使い方を想定している。
  */
 (function (global) {
   'use strict';
 
-  const GRAVITY = 9.8;
+  const G = 9.8;
+  // ドライブ回転で落ちる分の下向きの加速度(m/秒²)。これが無いと速いサーブ・スパイクはコートに収まらない
+  const TOPSPIN_JUMP_SERVE = 7;
+  const TOPSPIN_SPIKE = 6;
 
-  const TOSS_HEIGHT = 2.3;
-  const SETTER_HEIGHT = 2.2;
-  const TOSS_TARGET_HEIGHT = 3.0;
+  // ---- 触る高さ(m) ----
+  const PASS_H = 0.8;          // レシーブ(アンダーハンド)
+  const SET_H = 2.35;          // セッターのトス(オーバーハンド)
+  const BUMP_SET_H = 1.0;      // セッター以外が上げる二段トス(アンダー)
+  const FLOAT_SERVE_H = 2.6;   // フローターサーブの打点
+  const HAND_H = 1.1;          // サーブ前にボールを持っている高さ
 
-  const SERVE_ARC_HEIGHT = 4.0;
-  const SERVE_TIME = 2.6;
-  const TOSS_ARC_HEIGHT = 2.0;
-  const TOSS_TIME = 2.0;
-  const SPIKE_ARC_HEIGHT = 1.4;
-  const SPIKE_TIME = 0.85;
-  const LANDED_HOLD = 0.8;
+  // ---- 時間(秒) ----
+  const REACTION = 0.25;       // 相手が打ってから動き出すまで
+  const SERVE_REACTION = 0.3;  // サーブが打たれてから動き出すまで
+  const SERVE_REACH_RATE = 0.8; // サーブレシーブは体の正面で受けるので、飛びつける距離をこの割合にする
+  // サーブレシーブを弾いてしまう(コートの外へ飛ぶ=サービスエース)確率
+  //   clamp((レシーブのブレ×サーブの難しさ − SHANK_BASE) × SHANK_RATE, 0, SHANK_MAX)、飛びついた時は + SHANK_STRETCH
+  const SHANK_BASE = 0.9;
+  const SHANK_RATE = 0.15;
+  const SHANK_MAX = 0.12;
+  const SHANK_STRETCH = 0.06;
+  const TEAM_REACTION = 0.1;   // 味方の打球(パス・トス)に動き出すまで
+  const JUMP_UP = 0.4;         // スパイクのジャンプ: 踏み切りから最高点(打点)まで
+  const BLOCK_UP = 0.3;        // ブロックのジャンプ: 踏み切りから最高点まで
+  const SERVE_TOSS_TIME = 0.55; // サーブのトスを上げてから打つまで
+  const DEAD_HOLD = 1.2;       // ボールが落ちてから得点が入るまで
+  const BETWEEN_POINTS = 2.2;  // 得点が入ってからサーブを打てるようになるまで(この間に次の陣形へ歩く)
+  const CPU_SERVE_DELAY = 0.9; // サーブを打てるようになってからCPUが打つまで
+  const SET_BREAK = 4.0;       // セット間
 
-  const APPROACH_DIST = 0.6;
-  const JUMP_HEIGHT = 0.55;
-  const JUMP_DURATION_ATTACK = 0.55;
-  const LAND_DURATION = 0.45;
+  // トスの速さ(上げてから打点に届くまでの秒数)
+  const TEMPO = Object.freeze({ quick: 0.42, high: 1.25, back: 1.0, pipe: 1.0, highC: 1.6 });
 
-  const BLOCK_JUMP_HEIGHT = 0.5;
-  const JUMP_DURATION_BLOCK = 0.35;
-  const BLOCK_RETURN_DURATION = 0.7;
+  // ---- 立ち位置(チームのローカル座標。lx: そのチームから見て左が−・右が+ / d: ネットからの距離) ----
+  const SETTER_TARGET = { lx: 1.0, d: 1.5 };   // レシーブの返球先(セッターがトスを上げる位置)
+  const ATTACK_SPOTS = {                       // 打点(攻撃の種類ごと)
+    left: { lx: -3.5, d: 0.7 },  // レフト(前衛OH)
+    quick: { lx: 0.2, d: 0.55 }, // Aクイック(前衛MB)
+    right: { lx: 3.5, d: 0.7 },  // ライト(前衛OP)
+    pipe: { lx: 0, d: 3.6 },     // バックアタック(後衛OH。アタックラインの後ろから踏み切る)
+    bic: { lx: 2.6, d: 3.6 }     // バックライト(後衛OP)
+  };
+  const APPROACH_STARTS = {                    // 助走を始める位置
+    left: { lx: -4.3, d: 3.8 }, quick: { lx: 0.6, d: 2.7 }, right: { lx: 4.3, d: 3.8 },
+    pipe: { lx: 0, d: 7.0 }, bic: { lx: 3.0, d: 7.0 }
+  };
+  // ラリー中の基本の守備位置(専門の位置。FL=前衛レフト … BR=後衛ライト)
+  const BASE = {
+    FL: { lx: -2.6, d: 0.9 }, FM: { lx: 0, d: 0.9 }, FR: { lx: 2.6, d: 0.9 },
+    BL: { lx: -2.8, d: 6.4 }, BM: { lx: 0, d: 7.8 }, BR: { lx: 2.8, d: 6.4 }
+  };
+  // ローテーションの位置(サーブ前)。1=後衛ライト(サーバー) 2=前衛ライト 3=前衛センター 4=前衛レフト 5=後衛レフト 6=後衛センター
+  const ZONE_SPOT = {
+    1: { lx: 3, d: 6.2 }, 2: { lx: 3, d: 1.2 }, 3: { lx: 0, d: 1.2 },
+    4: { lx: -3, d: 1.2 }, 5: { lx: -3, d: 6.2 }, 6: { lx: 0, d: 6.2 }
+  };
+  const SERVE_SPOT = { lx: 2.2, d: 10.4 };     // サーブを打つ位置(エンドラインの外)
 
-  const WING_BLOCK_MOVE_TIME = 0.8;  // サイドの前衛がブロック位置へ寄るのにかける時間(秒)
-  const COVER_MOVE_TIME = 0.8;       // 反対サイドの前衛がフェイント/インナーのカバー位置へ下がる時間(秒)
-  const COVER_DEPTH = 3.0;           // カバー位置のネットからの距離(m)。アタックライン付近
-  const COVER_X_RATIO = 0.6;         // カバー位置の横位置(定位置の x に対する割合。内側へ寄る)
-  const DEFAULT_BLOCK_REACH = 0.55;  // ブロックで塞げる幅(ブロッカーの中心から左右それぞれ, m)の既定値
-  const DEFAULT_BLOCK_POWER = 50;    // ブロックの当たり判定で使うブロック値/パワー値の既定値
-  // ブロックの当たり判定(コースがブロックの範囲を通った時)。diff = ブロッカーのブロック値 − 攻撃者のパワー値。
-  //   当たる確率      = clamp(0.6  + diff*0.01 , 0.3 , 0.9)   当たらなければそのまま通過
-  //   当たった時: シャット(相手コートへ叩き落とす)= clamp(0.35 + diff*0.01 , 0.1 , 0.6)
-  //              ブロックアウト(手に当たって外へ) = clamp(0.15 - diff*0.005, 0.05, 0.3)
-  //              残りはワンタッチ(上に弾いて自陣へ。そのまま拾ってラリー続行)
-  const BLOCK_TOUCH_BASE = 0.6;
-  const BLOCK_STUFF_BASE = 0.35;
+  // ---- 狙い ----
+  const MAX_ERROR_SIGMA = 2.5;       // ブレは標準偏差のこの倍数までで打ち切る
+  const SET_ERROR_TO_SPIKE = 0.5;    // トスがずれた距離のこの割合だけ、スパイクのブレが大きくなる
+  const PASS_NET_SIDE_ERROR = 0.5;   // レシーブの返球がネット側へずれる時は、ずれをこの割合に小さくする(ネットを越えにくい)
+  const SPIKE_NET_MARGIN = 0.25;     // スパイクは狙った所へ白帯からこれだけ上を通して打つ(近くを狙う時は遅くして山なりに)
+  const SPIKE_HEIGHT_ERROR = 0.5;    // スパイクの打ち出しの上下のブレ(m/秒, ×スパイクのブレ)。ネット・オーバーの原因
+  const FREE_BALL_SET_ERROR = 1.3;   // トスがこれ以上ずれると打てず、チャンスボールで返す
+  const TIP_DEPTH = 2.5;             // 操作中のチームはネットからこれより手前を狙うとフェイントになる
+  const CPU_AIM_MARGIN = 0.4;        // CPUのスパイクはラインからこれだけ内側を狙う
+  const CPU_AIM_CANDIDATES = 6;      // CPUは狙いの候補をこの数だけ考え、ブロックの無いコースで守備から一番遠い所を選ぶ
+  const CPU_TIP_RATE = 0.06;         // CPUがフェイントを選ぶ確率(2枚ブロックの時は+0.06)
+  const CPU_DUMP_RATE = 0.06;        // 前衛セッターがAパスをツーアタックする確率
+  const CPU_COMMIT_RATE = 0.4;       // CPUのMBが相手のクイックにつられて跳ぶ確率
+  const OUT_JUDGE_MARGIN = 0.15;     // 相手の打球がこれ以上外に落ちる時は見送る
+
+  // ---- 選手の動き ----
+  const JOG = 0.75;                  // 陣形へ戻る時は全力の何割で走るか
+  const BLOCK_CONTROL_SPEED = 3.5;   // 操作中のチームのMBをジョイスティックで動かす速さ(m/秒)
+  const BLOCK_NET_D = 0.4;           // ブロックに跳ぶ位置のネットからの距離
+
+  // ---- ブロックの当たり判定 ----
+  // diff = ブロッカーのブロック値 − 攻撃者のパワー値、n = 跳んでいるブロッカーの枚数
+  //   当たる確率      = clamp(0.55 + diff*0.01 + (n-1)*0.1, 0.3, 0.92)
+  //   当たった時: シャット = clamp(0.3 + diff*0.01, 0.1, 0.6)、ブロックアウト = clamp(0.15 - diff*0.005, 0.05, 0.3)、残りはワンタッチ
+  const BLOCK_TOUCH_BASE = 0.55;
+  const BLOCK_STUFF_BASE = 0.3;
   const BLOCK_OUT_BASE = 0.15;
-  const BLOCK_CONTROL_SPEED = 3.5; // 自分側ブロッカーをジョイスティックで操作する速度(m/秒)
-  const BLOCK_SIDE_MARGIN = 0.3; // ブロック操作できる範囲をコート端からこれだけ内側に制限
+  const BLOCK_OVER_MARGIN = 0.1;     // 打球がブロックの手よりこれ以上高く通ると当たらない
 
-  const DEFAULT_PLAYER_SPEED = 4.4; // 選手ごとの speed パラメータを省略した場合の既定値(m/秒)
-  const RECEIVE_MOVE_MIN = 0.25;
-  const RECEIVE_RETURN_MIN = 0.3;
-  const RECEIVE_RETURN_MAX = 1.6;
-  const RECEIVE_ARC_HEIGHT = 2.2;   // レシーブ(返球)の山なりの高さ
-  const RECEIVE_TIME = 1.6;         // レシーブがセッターへ届くまでの時間(=トス方向を選べる時間)
-  const RECEIVE_TARGET_HEIGHT = 2.0;
+  // ステータス50・身長180cm相当(VolleyballStats.toPlayParams と同じ形)
+  const DEFAULT_ABILITY = Object.freeze({
+    speed: 4.3, reach: 0.85, jumpHeight: 0.75, attackReach: 3.14, blockTop: 3.08,
+    spikeSpeed: 24, jumpServe: false, serveSpeed: 17,
+    spikeError: 0.7, serveError: 0.65, passError: 0.9, tossError: 0.5,
+    blockReach: 0.55, blockPower: 50, attackPower: 50, toss: 50
+  });
 
-  // レシーブ到達判定：落下の瞬間、レシーバーがこの距離以内まで寄れていれば(飛びついて)拾える。
-  // 届かなければボールはそのまま落ちてラリー終了。
-  const DIVE_REACH = 0.8;
-  // 打たれてからレシーバーが動き出すまでの反応時間(秒)。これが無いと打った瞬間に最短で走り出せてしまい、
-  // スパイク(約0.85秒で着地)でもほぼ全部拾えてしまう。
-  const REACTION_TIME = 0.3;
-  // 狙いのブレ(正規分布の標準偏差, m)の既定値。選手ごとの値は能力(VolleyballStats)から渡される。
-  const DEFAULT_SPIKE_ERROR = 0.75;
-  const DEFAULT_SERVE_ERROR = 0.7;
-  const DEFAULT_PASS_ERROR = 0.85;
-  const DEFAULT_TOSS_ERROR = 0.5;
-  const MAX_ERROR_SIGMA = 2.5;       // ブレは標準偏差のこの倍数までで打ち切る(極端な外れ値を防ぐ)
-  const TOSS_ERROR_TO_SPIKE = 0.5;   // トスがずれた距離のこの割合だけ、スパイクのブレが大きくなる
-  const FAR_AIM_MARGIN = 0.3;        // 相手(CPU)はサイドライン・エンドラインからこれだけ内側を狙う
-  const FAR_AIM_MIN_DEPTH = 1.5;     // 相手(CPU)はネットからこれ以上奥を狙う
-  const FAR_AIM_CANDIDATES = 5;      // 相手(CPU)は狙いの候補をこの数だけ考え、こちらの選手から一番遠い所を選ぶ(大きいほど隙を突くのがうまい)
+  const ROLE_ORDER = ['S', 'OH', 'MB', 'OP', 'OH', 'MB']; // サーブ順の役割(5-1システム)
 
-  const TOSS_ZONE_THRESHOLD = 1 / 3; // ジョイスティックx入力をレフト/センター/ライトの3等分ゾーンに分ける境界
-
-  const SERVE_MARGIN = 1;
-  const MARKER_SPEED = 4; // m/秒
-
-  function vec(x, y, z) { return { x: x, y: y, z: z }; }
-
-  // 円形のジョイスティック入力(半径最大1)を正方形の可動範囲いっぱいまで
-  // 届くように引き伸ばす変換（対角=コートの隅にも到達できるようにする）
-  function discToSquare(x, y) {
-    if (x === 0 && y === 0) return { x: 0, y: 0 };
-    const mag = Math.min(1, Math.hypot(x, y));
-    const maxAbs = Math.max(Math.abs(x), Math.abs(y));
-    const scale = mag / maxAbs;
-    return { x: x * scale, y: y * scale };
-  }
-
-  function lerp(a, b, t) { return a + (b - a) * t; }
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function hypot2(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
 
   // 標準正規分布の乱数(Box-Muller)
   function gaussian() {
@@ -103,1182 +136,1065 @@
     while (u === 0) u = Math.random();
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
   }
-
-  // 狙った点(x,z)を、標準偏差 sigma(m) でランダムにずらす。y はそのまま。
   function scatter(p, sigma) {
-    const dx = clamp(gaussian(), -MAX_ERROR_SIGMA, MAX_ERROR_SIGMA) * sigma;
-    const dz = clamp(gaussian(), -MAX_ERROR_SIGMA, MAX_ERROR_SIGMA) * sigma;
-    return { x: p.x + dx, y: p.y, z: p.z + dz };
+    return {
+      x: p.x + clamp(gaussian(), -MAX_ERROR_SIGMA, MAX_ERROR_SIGMA) * sigma,
+      y: p.y,
+      z: p.z + clamp(gaussian(), -MAX_ERROR_SIGMA, MAX_ERROR_SIGMA) * sigma
+    };
+  }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  // 円形のジョイスティック入力を正方形の可動範囲いっぱいまで届くように引き伸ばす(対角=コートの隅)
+  function discToSquare(x, y) {
+    if (x === 0 && y === 0) return { x: 0, y: 0 };
+    const mag = Math.min(1, Math.hypot(x, y));
+    const scale = mag / Math.max(Math.abs(x), Math.abs(y));
+    return { x: x * scale, y: y * scale };
   }
 
-  function zoneFromJoystickX(x) {
-    if (x <= -TOSS_ZONE_THRESHOLD) return 'left';
-    if (x >= TOSS_ZONE_THRESHOLD) return 'right';
-    return 'center';
+  // ---- 放物線 ----
+  // from から to へ T 秒で届く初速(g: 下向きの加速度。回転の分を含む)
+  function ballistic(from, to, T, g) {
+    const gg = g || G;
+    return { x: (to.x - from.x) / T, y: (to.y - from.y + 0.5 * gg * T * T) / T, z: (to.z - from.z) / T };
+  }
+  function posAt(f, t) {
+    const g = f.g || G;
+    return { x: f.p0.x + f.v.x * t, y: f.p0.y + f.v.y * t - 0.5 * g * t * t, z: f.p0.z + f.v.z * t };
+  }
+  // 落ちてくる途中で高さ h を通る時刻(届かなければ null)
+  function timeToHeight(f, h) {
+    const g = f.g || G;
+    const disc = f.v.y * f.v.y - 2 * g * (h - f.p0.y);
+    if (disc < 0) return null;
+    return (f.v.y + Math.sqrt(disc)) / g;
   }
 
   /**
    * @param {Object} config
    * @param {Object} config.dimensions - VolleyballCourt.DIMENSIONS 相当
    * @param {number} config.ballRadius - VolleyballBall.RADIUS 相当
-   * @param {{x:number,z:number}} config.serverPos - サーブを打つ位置(コート外)。サーバーは近チームの
-   *        セッター(near-server)を兼任し、サーブを打った後は config.setterCourtPos へ入って守る。
-   * @param {{x:number,z:number}} [config.setterCourtPos] - セッターのラリー中の守備位置(後衛ライト)。
-   *        省略時はサーブ位置の x、後衛(nearReceivers[0])と同じ z。
-   * @param {{x:number,z:number}} config.leftAttackerPos - レフト攻撃者(near-front-1)の位置
-   * @param {{x:number,z:number}} config.centerAttackerPos - センター攻撃者(near-front-2)の位置。
-   *        自チームブロッカー(ジョイスティック左右操作)とスロットを共有する。
-   * @param {{x:number,z:number}} config.rightAttackerPos - ライト攻撃者(near-front-3)の位置
-   * @param {{left?:Object, center?:Object, right?:Object}} [config.attackers] - 3攻撃者の能力
-   *        { jumpHeight?, spikeTime? }。省略時は JUMP_HEIGHT / SPIKE_TIME。
-   * @param {number} [config.serveTime] - サーブが着地するまでの時間(秒)。省略時は SERVE_TIME。
-   * @param {Array<{name:string, pos:{x:number,z:number}, speed?:number, reach?:number}>} config.nearReceivers -
-   *        自チームのレシーブ担当(near-back-1/2)。落下点に最も近い選手が自動でレシーブする。
-   * @param {Array<{name:string, pos:{x:number,z:number}, speed?:number,
-   *        reach?:number, jumpHeight?:number, spikeTime?:number}>} config.farPlayers -
-   *        相手チーム6人の定義。こちらの攻撃に対しては、センター(far-front-2)と攻撃側の前衛
-   *        (far-front-1 / far-front-3)が打点へ寄ってブロックに跳ぶ。
-   *        レシーブは毎回、落下点に最も近い選手が自動で行う。
-   *
-   * 選手ごとの能力(キャラクターのステータスから VolleyballStats で変換した値):
-   *   speed(m/秒)移動速度 / reach(m)飛びつける距離 / jumpHeight(m)スパイクのジャンプ高さ /
-   *   spikeTime(秒)スパイクが着地するまでの時間。省略時は各定数の標準値。
-   * 狙いの正確さ(ブレの標準偏差, m。小さいほど狙った所に行く):
-   *   spikeError(スパイク) / passError(レシーブの返球) / tossError(トス)。
-   *   config.serveError(サーブ)、config.setter = { tossError, speed?, reach?, passError? }(自チームのセッター)。
-   *
-   * 自チームのレシーブ: 後衛2人(nearReceivers)・セッター(コートに入った後)・前衛レフト/ライトのうち、
-   * 落下点に最も近い選手が拾う(前衛センターはブロッカーを兼ねるので拾わない)。セッター自身が拾った時は、
-   * 他の後衛のうちトスが一番うまい選手が代わりにトスを上げる。前衛の能力(speed/reach/passError)は
-   * config.attackers の各要素で渡す。
-   *
-   * 自チームのブロック: 相手のトスが上がると、前衛センター(ジョイスティックで左右に操作)に加えて、
-   * トスが上がった側の前衛(レフト/ライト)がその位置へ寄って一緒に跳ぶ。反対側の前衛はネットから
-   * 下がってフェイント/インナーのカバーに入る(そこからレシーブに参加する)。
-   * 相手は前衛レフト(far-front-1)・ライト(far-front-3)のどちらかにランダムにトスを上げる。
-   *
-   * ブロックの当たり判定: スパイクのコースがネット(z=0)を通る位置が、跳んでいるブロッカーの範囲
-   * (blockReach)に入ると、ブロック値と攻撃者のパワー値で「通過/シャット/ワンタッチ/ブロックアウト」
-   * が決まる(BLOCK_*_BASE)。選手ごとの blockPower / attackPower(1〜99)で渡す。
-   *
-   * ラリーの結果は getState() の rallyCount / lastRally({ winner:'near'|'far', reason:'in'|'out'|'net' }) で分かる。
+   * @param {{near:Object, far:Object}} config.teams - 各チーム
+   *        { members: [{ id, role:'S'|'OH'|'MB'|'OP'|'L', order:0〜5(リベロは null), ability }], rotationStart?: 1〜6 }
+   *        order はサーブ順(0=S, 1=OH1, 2=MB1, 3=OP, 4=OH2, 5=MB2)。ability は VolleyballStats.toPlayParams の形。
+   *        rotationStart はセッターの最初の位置(省略時1=後衛ライト)。
+   * @param {string|null} [config.controlSide='near'] - プレイヤーが操作するチーム。null なら両チームCPU(早送りの検証用)
+   * @param {{setsToWin?:number, setPoints?:number, finalSetPoints?:number}} [config.rules] - 既定は2セット先取・25点・最終セット15点
+   * @param {string} [config.firstServe='near'] - 第1セットで最初にサーブを打つチーム
+   * @param {Function} [config.onEvent] - 試合中の出来事の通知 (type, data)。画面の演出や早送りの集計に使う。
+   *        'serve' {side, jump} / 'pass' {side, quality, kind} / 'set' {side, key, quality} / 'attack' {side, kind} /
+   *        'block' {side(ブロックした側), result:'stuff'|'out'|'touch'} / 'net' {kind, side} /
+   *        'rally' {winner, reason, serving, kind(最後の打球の種類)}
    */
   function create(config) {
     const d = config.dimensions;
-    const ballRadius = config.ballRadius;
-    const frontZ = config.centerAttackerPos.z;
+    const R = config.ballRadius;
+    const HALF_W = d.COURT_W / 2;
+    const HALF_L = d.COURT_L / 2;
+    const NET_CLEAR = d.NET_TOP + R;
+    const rules = Object.assign({ setsToWin: 2, setPoints: 25, finalSetPoints: 15 }, config.rules || {});
+    const control = config.controlSide === undefined ? 'near' : config.controlSide;
+    const other = side => (side === 'near' ? 'far' : 'near');
+    const emit = (type, data) => { if (config.onEvent) config.onEvent(type, data); };
 
-    const serveRange = {
-      xMin: -(d.COURT_W / 2 + SERVE_MARGIN),
-      xMax: d.COURT_W / 2 + SERVE_MARGIN,
-      zNet: -0.3,
-      zFar: -(d.COURT_L / 2 + SERVE_MARGIN)
-    };
-
-    const serveOrigin = vec(config.serverPos.x, TOSS_HEIGHT, config.serverPos.z - 0.4);
-
-    function tossTargetFor(pos, sideSign) {
-      return vec(pos.x + sideSign * 0.3, TOSS_TARGET_HEIGHT, pos.z + 0.2);
-    }
-
-    // 自チームの3攻撃者(レフト/センター/ライト)。トスの狙い先はそれぞれの定位置から少し手前・net寄り。
-    const attackTargets = {
-      left: tossTargetFor(config.leftAttackerPos, -1),
-      center: tossTargetFor(config.centerAttackerPos, 0),
-      right: tossTargetFor(config.rightAttackerPos, 1)
-    };
-
-    // レシーブの返球先(セッターが寄っていく固定の待機点)。
-    const passTargetPoint = vec(1.0, RECEIVE_TARGET_HEIGHT, frontZ + 1.8);
-
-    function makeAttacker(pos, ability) {
-      const a = ability || {};
-      return {
-        baseX: pos.x, baseZ: pos.z,
-        jumpHeight: a.jumpHeight || JUMP_HEIGHT,
-        spikeTime: a.spikeTime || SPIKE_TIME,
-        spikeError: a.spikeError || DEFAULT_SPIKE_ERROR,
-        // 前衛レフト/ライトはネット際の短いボールをレシーブする
-        speed: a.speed || DEFAULT_PLAYER_SPEED,
-        reach: a.reach || DIVE_REACH,
-        passError: a.passError || DEFAULT_PASS_ERROR,
-        tossError: a.tossError || DEFAULT_TOSS_ERROR,
-        blockReach: a.blockReach || DEFAULT_BLOCK_REACH,
-        blockPower: a.blockPower || DEFAULT_BLOCK_POWER,
-        attackPower: a.attackPower || DEFAULT_BLOCK_POWER,
-        x: pos.x, y: 0, z: pos.z,
-        activity: 'idle', // 'idle' | 'attack' | 'receive' | 'block'(サイドのブロック) | 'cover'(フェイントのカバー)
-        phase: 'idle', // attack: 'approach' | 'landing' / receive: updateReceiver と同じ
-        phaseStart: 0,
-        attackFromX: pos.x, attackFromZ: pos.z, // 助走を始めた位置(レシーブ後の位置から助走に入れるように)
-        approachFrom: null,
-        approachTo: null,
-        approachDuration: 0,
-        returnFrom: null
+    // ---------- チーム・選手 ----------
+    function makeTeam(side, cfg) {
+      const s = side === 'near' ? 1 : -1;
+      const T = {
+        side: side, s: s, order: [], libero: null, members: [], onCourt: [],
+        rotStart: cfg.rotationStart || 1, rot: 0, points: 0, sets: 0,
+        touches: 0, lastToucher: null, mbCommit: null, quickPlan: null
       };
-    }
-
-    const attackerAbility = config.attackers || {};
-    const leftAttacker = makeAttacker(config.leftAttackerPos, attackerAbility.left);
-    const centerAttacker = makeAttacker(config.centerAttackerPos, attackerAbility.center);
-    const rightAttacker = makeAttacker(config.rightAttackerPos, attackerAbility.right);
-    let currentNearAttacker = centerAttacker; // トスを上げた攻撃者(スパイクの速さに使う)
-    const serveTime = config.serveTime || SERVE_TIME;
-    const serveError = config.serveError || DEFAULT_SERVE_ERROR;
-    let lastTossDeviation = 0; // 直前のトスが狙いからずれた距離(スパイクのブレに上乗せする)
-    const attackersByZone = { left: leftAttacker, center: centerAttacker, right: rightAttacker };
-
-    // 相手チーム6人。ブロックはこちらの攻撃ごとに担当を決め、レシーブは毎回最寄りの選手が行う。
-    const farPlayers = config.farPlayers.map(p => ({
-      name: p.name,
-      baseX: p.pos.x,
-      baseZ: p.pos.z,
-      blockFromX: p.pos.x,   // ブロックで寄り始めた位置
-      blockTargetX: p.pos.x, // ブロックで寄る先(こちらの打点に合わせてトスごとに決まる)
-      blockReach: p.blockReach || DEFAULT_BLOCK_REACH,
-      blockPower: p.blockPower || DEFAULT_BLOCK_POWER,
-      attackPower: p.attackPower || DEFAULT_BLOCK_POWER,
-      speed: p.speed || DEFAULT_PLAYER_SPEED,
-      reach: p.reach || DIVE_REACH,
-      jumpHeight: p.jumpHeight || JUMP_HEIGHT,
-      spikeTime: p.spikeTime || SPIKE_TIME,
-      spikeError: p.spikeError || DEFAULT_SPIKE_ERROR,
-      passError: p.passError || DEFAULT_PASS_ERROR,
-      tossError: p.tossError || DEFAULT_TOSS_ERROR,
-      x: p.pos.x,
-      y: 0,
-      z: p.pos.z,
-      activity: 'idle', // 'idle' | 'block' | 'receive' | 'attack'
-      phase: 'idle',
-      phaseStart: 0,
-      approachFrom: null,
-      approachTo: null,
-      approachDuration: 0,
-      returnFrom: null
-    }));
-    // レシーブを受けるセッター役、そこから打つアタッカー役(近チームのセッター/レフトと同じ関係を相手側にも用意する)。
-    const receiveTargetPlayer =
-      farPlayers.find(p => p.name === 'far-front-2') || farPlayers[0];
-    // 相手の攻撃者は前衛の左右(far-front-1 / far-front-3)。トスごとにどちらかを選ぶ。
-    const farAttackers = ['far-front-1', 'far-front-3']
-      .map(name => farPlayers.find(p => p.name === name))
-      .filter(Boolean);
-    if (!farAttackers.length) farAttackers.push(farPlayers[0]);
-    let farAttacker = farAttackers[0]; // 今回トスが上がった相手の攻撃者
-
-    // 自チームのレシーブ担当(near-back-1/2)。落下点に最も近い選手が自動で拾う。
-    const nearReceivers = config.nearReceivers.map(p => ({
-      name: p.name,
-      baseX: p.pos.x,
-      baseZ: p.pos.z,
-      speed: p.speed || DEFAULT_PLAYER_SPEED,
-      reach: p.reach || DIVE_REACH,
-      passError: p.passError || DEFAULT_PASS_ERROR,
-      tossError: p.tossError || DEFAULT_TOSS_ERROR, // セッターが1本目を拾った時に代わりにトスを上げる
-      x: p.pos.x,
-      y: 0,
-      z: p.pos.z,
-      activity: 'idle', // 'idle' | 'receive' | 'set'
-      phase: 'idle',
-      phaseStart: 0,
-      approachFrom: null,
-      approachTo: null,
-      approachDuration: 0,
-      returnFrom: null
-    }));
-
-    // ---- 可変状態 ----
-    const target = { x: 0, z: -d.COURT_L / 4 }; // 初期位置は相手コートの中央固定
-
-    const ball = {
-      x: serveOrigin.x, y: serveOrigin.y, z: serveOrigin.z,
-      rotX: 0, rotZ: 0,
-      flightState: 'idle' // 'idle' | 'flying' | 'netFalling' | 'received' | 'landed'
-    };
-
-    // 自分側のブロッカー(センター攻撃者=near-front-2 のスロットを兼任)。相手が攻撃してくる間だけ
-    // ジョイスティックの左右で位置を操作でき、ジャンプ自体は自動で行われる。
-    const nearBlockRange = {
-      xMin: -(d.COURT_W / 2 - BLOCK_SIDE_MARGIN),
-      xMax: d.COURT_W / 2 - BLOCK_SIDE_MARGIN
-    };
-    const nearBlocker = {
-      baseX: config.centerAttackerPos.x,
-      baseZ: config.centerAttackerPos.z,
-      x: config.centerAttackerPos.x,
-      y: 0,
-      z: config.centerAttackerPos.z,
-      controlActive: false,
-      // 前衛センターのブロック力(センター攻撃者と同じ選手)
-      blockReach: (config.attackers && config.attackers.center && config.attackers.center.blockReach) || DEFAULT_BLOCK_REACH,
-      blockPower: (config.attackers && config.attackers.center && config.attackers.center.blockPower) || DEFAULT_BLOCK_POWER,
-      phase: 'idle', // 'idle' | 'jumping' | 'landing' | 'returning'
-      phaseStart: 0,
-      jumpX: config.centerAttackerPos.x,
-      returnFrom: null
-    };
-
-    // 近チームのセッター(near-server)。サーブはコート外(serveX/Z)から打ち、打った後はコートの
-    // 守備位置(baseX/Z = 後衛ライト)に入って3人目の後衛として守る。ラリーが終わるとサーブ位置へ戻る。
-    // 返球が上がるとその位置へ寄っていき(activity 'set')、寄っている間のジョイスティック入力で
-    // トス方向(レフト/センター/ライト)を決める。
-    const setterAbility = config.setter || {};
-    const setterCourtPos = config.setterCourtPos || {
-      x: config.serverPos.x,
-      z: config.nearReceivers.length ? config.nearReceivers[0].pos.z : d.COURT_L / 2 - 2
-    };
-    const nearSetter = {
-      name: 'near-server',
-      serveX: config.serverPos.x,
-      serveZ: config.serverPos.z,
-      baseX: setterCourtPos.x,
-      baseZ: setterCourtPos.z,
-      speed: setterAbility.speed || DEFAULT_PLAYER_SPEED,
-      reach: setterAbility.reach || DIVE_REACH,
-      passError: setterAbility.passError || DEFAULT_PASS_ERROR,
-      tossError: setterAbility.tossError || DEFAULT_TOSS_ERROR,
-      x: config.serverPos.x,
-      y: 0,
-      z: config.serverPos.z,
-      activity: 'idle', // 'idle' | 'receive' | 'set' | 'toServe'
-      phase: 'idle',
-      phaseStart: 0,
-      approachFrom: null,
-      approachTo: null,
-      approachDuration: 0,
-      returnFrom: null
-    };
-    let settingPlayer = null; // 今トスを上げに寄っている選手(通常はセッター、セッターが1本目を拾ったら代わりの選手)
-    let pendingTossZone = 'center';
-    let blockTouchSide = 'near'; // ワンタッチで弾いたボールを拾う側
-
-    let time = 0;
-
-    // ラリーの勝敗。最後にボールに触ったチーム(lastHitter)と、落ちた場所で決める。
-    const NEAR_FLIGHTS = { serve: true, toss: true, spike: true, nearReceivePass: true };
-    let lastHitter = 'near';
-    let netFault = false;      // 今のボールがネットにかかったか
-    let rallyResolved = true;  // 今のボールの勝敗を記録済みか
-    let rallyCount = 0;
-    let lastRally = null;      // { winner: 'near'|'far', reason: 'in'|'out'|'net'|'block'|'blockout' }
-    let pendingBlock = null;   // 今の打球がネット上でブロックに当たる予定 { side, result }
-
-    function resolveRally() {
-      const other = lastHitter === 'near' ? 'far' : 'near';
-      let winner, reason;
-      if (netFault) {
-        winner = other; reason = 'net';
-      } else {
-        const side = ball.z >= 0 ? 'near' : 'far';
-        if (isInCourt(ball, side)) {
-          winner = side === 'near' ? 'far' : 'near';
-          reason = flight.kind === 'blockStuff' ? 'block' : 'in';
-        } else {
-          winner = other;
-          reason = flight.kind === 'blockOut' ? 'blockout' : 'out';
-        }
-      }
-      rallyCount++;
-      lastRally = { winner: winner, reason: reason };
-      rallyResolved = true;
-    }
-    let tossActive = false;
-    let farTossActive = false;
-
-    const flight = {
-      kind: 'serve', // 'serve' | 'toss' | 'spike' | 'receivePass' | 'farToss' | 'farSpike' | 'incomingSpike' | 'nearReceivePass'
-      from: Object.assign({}, serveOrigin),
-      to: Object.assign({}, serveOrigin),
-      arcHeight: SERVE_ARC_HEIGHT,
-      duration: SERVE_TIME,
-      endT: 1,
-      start: 0
-    };
-    let landedAt = 0;
-    let netFall = { from: 0, x: 0, z: 0, start: 0 };
-
-    function sampleParabola(t) {
-      const x = lerp(flight.from.x, flight.to.x, t);
-      const z = lerp(flight.from.z, flight.to.z, t);
-      const baseY = lerp(flight.from.y, flight.to.y, t);
-      const y = baseY + 4 * flight.arcHeight * t * (1 - t);
-      return { x: x, y: y, z: z };
-    }
-
-    // 共通の打球処理本体（実行中の飛行を打ち切って開始する場合にも使う＝スパイクがトスを中断する）。
-    // hitter: 打ったチーム('near'|'far')。省略時は kind から決める(ブロックの跳ね返りは跳んだ側)。
-    function beginFlight(kind, from, to, arcHeight, duration, checkNet, hitter) {
-      flight.kind = kind;
-      flight.from = Object.assign({}, from);
-      flight.to = Object.assign({}, to);
-      flight.arcHeight = arcHeight;
-
-      let endT = 1;
-      if (checkNet) {
-        const tNet = clamp((flight.from.z - 0) / (flight.from.z - flight.to.z), 0.02, 0.98);
-        const netPoint = sampleParabola(tNet);
-        const willHitNet = netPoint.y < d.NET_TOP + ballRadius + 0.03;
-        endT = willHitNet ? tNet : 1;
-      }
-
-      flight.endT = endT;
-      flight.duration = duration * flight.endT;
-      flight.start = time;
-      ball.flightState = 'flying';
-      lastHitter = hitter || (NEAR_FLIGHTS[kind] ? 'near' : 'far');
-      pendingBlock = null;
-      netFault = false;
-      rallyResolved = false;
-    }
-
-    // ボールの着地点がコート内か(ライン上はイン)。side: 'near'(z>0) | 'far'(z<0)
-    function isInCourt(p, side) {
-      if (Math.abs(p.x) > d.COURT_W / 2 + ballRadius) return false;
-      return side === 'near'
-        ? p.z >= 0 && p.z <= d.COURT_L / 2 + ballRadius
-        : p.z <= 0 && p.z >= -(d.COURT_L / 2 + ballRadius);
-    }
-
-    // トスが攻撃者の高さに届いた瞬間、自動でスパイクを打つ。
-    // ネットを越えてコート内に落ちる打球なら、相手が自動でレシーブに走る(ラリー継続)。
-    function autoSpike(fromPoint) {
-      tossActive = false;
-      const spikeOrigin = vec(fromPoint.x, fromPoint.y, fromPoint.z);
-      // 狙った位置から、攻撃者の精度(+トスのずれ)に応じてブレる
-      const sigma = currentNearAttacker.spikeError + lastTossDeviation * TOSS_ERROR_TO_SPIKE;
-      const spikeTarget = scatter(vec(target.x, ballRadius + 0.02, target.z), sigma);
-      beginFlight('spike', spikeOrigin, spikeTarget, SPIKE_ARC_HEIGHT, currentNearAttacker.spikeTime, true);
-      if (flight.endT < 1) return; // ネット
-      if (checkBlock('far', spikeOrigin, spikeTarget, farBlockSpans(), currentNearAttacker.attackPower)) return;
-      prepareReceive(spikeTarget);
-    }
-
-    // サーブを打った瞬間(=着地点が決まった瞬間)に、最寄りの選手を先読みで走らせ始める。
-    // こうすることで「ボールが来てから動き出す」のではなく、ボールが来る位置へ
-    // 先回りして待ち構える、というレシーブらしい動きになる。
-    let currentReceiver = null;
-
-    // レシーブに参加できる状態か(立っている・レシーブ中・フェイントのカバー中)。
-    function canReceive_(p) {
-      return p.activity === 'idle' || p.activity === 'receive' || p.activity === 'cover';
-    }
-
-    // 着地点に最も近い選手を(現在位置基準で)選ぶ。アウトの打球は誰も追わない。
-    // ブロック・攻撃・トス・サーブ位置への移動中の選手はレシーブに参加できない
-    // (＝ブロッカーの後ろ/横が狙い目になる)。
-    function nearestReceiver(candidates, landingPoint) {
-      let receiver = null, bestDist = Infinity;
-      candidates.forEach(p => {
-        if (!canReceive_(p)) return;
-        const dist = Math.hypot(landingPoint.x - p.x, landingPoint.z - p.z);
-        if (dist < bestDist) { bestDist = dist; receiver = p; }
+      cfg.members.forEach(m => {
+        const p = {
+          id: m.id, side: side, role: m.role, order: m.order,
+          ab: Object.assign({}, DEFAULT_ABILITY, m.ability || {}),
+          x: 0, y: 0, z: 0, goal: null, moveSpeed: 0, jump: null,
+          zone: null, slot: null, onCourt: false
+        };
+        T.members.push(p);
+        if (m.role === 'L') T.libero = p; else T.order[m.order] = p;
       });
-      return receiver ? { receiver: receiver, dist: bestDist } : null;
+      for (let i = 0; i < 6; i++) {
+        if (!T.order[i]) throw new Error('チーム ' + side + ' のサーブ順 ' + (i + 1) + ' 番目(' + ROLE_ORDER[i] + ')がいません');
+      }
+      return T;
     }
+    const teams = { near: makeTeam('near', config.teams.near), far: makeTeam('far', config.teams.far) };
+    const allPlayers = teams.near.members.concat(teams.far.members);
 
-    // 落下の瞬間に、レシーバーが飛びつける距離まで寄れているか。
-    function reachedBall(receiver, landingPoint) {
-      return Math.hypot(receiver.x - landingPoint.x, receiver.z - landingPoint.z) <= receiver.reach;
+    // ローカル座標 ↔ ワールド座標
+    function W(T, lx, dd) { return { x: T.s * lx, z: T.s * dd }; }
+    function Wp(T, spot) { return W(T, spot.lx, spot.d); }
+    function L(T, x, z) { return { lx: T.s * x, d: T.s * z }; }
+
+    function zoneOf(T, i) { return ((T.rotStart - 1 + i - T.rot) % 6 + 6) % 6 + 1; }
+    function isFrontZone(z) { return z >= 2 && z <= 4; }
+    function specialistSlot(p) {
+      const front = isFrontZone(p.zone);
+      if (p.role === 'L') return 'BL';
+      if (p.role === 'OH') return front ? 'FL' : 'BM';
+      if (p.role === 'MB') return front ? 'FM' : 'BL';
+      return front ? 'FR' : 'BR'; // S / OP
     }
+    function bySlot(T, slot) { return T.onCourt.find(p => p.slot === slot) || null; }
+    function setterOf(T) { return T.onCourt.find(p => p.role === 'S') || null; }
+    function serverOf(T) { return T.onCourt.find(p => p.zone === 1) || null; }
 
-    function prepareReceive(landingPoint) {
-      if (!isInCourt(landingPoint, 'far')) return;
-      const pick = nearestReceiver(farPlayers, landingPoint);
-      if (!pick) return;
-      const receiver = pick.receiver;
-      const bestDist = pick.dist;
-
-      currentReceiver = receiver;
-      receiver.activity = 'receive';
-      receiver.phase = 'approach';
-      receiver.phaseStart = time + REACTION_TIME; // 反応するまではその場で構えたまま
-      receiver.approachFrom = { x: receiver.x, z: receiver.z };
-      receiver.approachTo = { x: landingPoint.x, z: landingPoint.z };
-      receiver.approachDuration = Math.max(bestDist / receiver.speed, RECEIVE_MOVE_MIN);
-    }
-
-    // ネットにかかった等でレシーブが不要になった場合、待機中の選手を定位置へ戻す。
-    function cancelReceive() {
-      if (!currentReceiver) return;
-      const r = currentReceiver;
-      currentReceiver = null;
-      r.returnFrom = { x: r.x, z: r.z };
-      r.phase = 'returning';
-      r.phaseStart = time;
-    }
-
-    // ボールが実際に落ちてきた瞬間の処理。既に待ち構えていればすぐ返球し、
-    // 万一まだ到達していなければその場でボールに合わせてから返球する。
-    function finalizeReceive(landingPoint) {
-      ball.x = landingPoint.x; ball.y = landingPoint.y; ball.z = landingPoint.z;
-      ball.flightState = 'received';
-
-      const receiver = currentReceiver;
-      currentReceiver = null;
-      if (!receiver || !reachedBall(receiver, landingPoint)) {
-        // 誰も追っていない(アウト)か、間に合わなかった＝ボールが落ちてラリー終了。
-        ball.flightState = 'landed';
-        landedAt = time;
-        if (receiver) {
-          receiver.returnFrom = { x: receiver.x, z: receiver.z };
-          receiver.phase = 'returning';
-          receiver.phaseStart = time;
+    // ローテーションに合わせてコートに入る6人を決める(リベロは後衛のMBと交代。MBがサーブを打つ時は除く)
+    function arrangeTeam(T) {
+      T.members.forEach(p => { p.onCourt = false; p.zone = null; p.slot = null; });
+      T.onCourt = [];
+      T.order.forEach((p, i) => {
+        p.zone = zoneOf(T, i);
+        let q = p;
+        if (T.libero && p.role === 'MB' && !isFrontZone(p.zone) && !(p.zone === 1 && servingSide === T.side)) {
+          q = T.libero;
+          q.zone = p.zone;
         }
+        q.onCourt = true;
+        T.onCourt.push(q);
+      });
+      T.onCourt.forEach(p => { p.slot = specialistSlot(p); });
+      T.touches = 0;
+      T.lastToucher = null;
+      T.mbCommit = null;
+      T.quickPlan = null;
+    }
+
+    // ---------- 選手の動き ----------
+    function moveTo(p, pt, speedMul) {
+      p.goal = { x: pt.x, z: pt.z };
+      p.moveSpeed = p.ab.speed * (speedMul || 1);
+    }
+    function moveLocal(p, spot, speedMul) { moveTo(p, Wp(teams[p.side], spot), speedMul); }
+    function startJump(p, at, up, h) { p.jump = { start: at, up: up, h: h }; }
+    function airborne(p, at) { return !!p.jump && at >= p.jump.start && at < p.jump.start + 2 * p.jump.up; }
+    function jumpY(p, at) {
+      if (!p.jump) return 0;
+      const u = (at - p.jump.start - p.jump.up) / p.jump.up;
+      if (u < -1 || u > 1) return 0;
+      return p.jump.h * (1 - u * u);
+    }
+    function updatePlayers(dt) {
+      allPlayers.forEach(p => {
+        if (p.goal) {
+          const dx = p.goal.x - p.x, dz = p.goal.z - p.z;
+          const dist = Math.hypot(dx, dz);
+          const step = p.moveSpeed * dt;
+          if (dist <= step) { p.x = p.goal.x; p.z = p.goal.z; p.goal = null; }
+          else { p.x += dx / dist * step; p.z += dz / dist * step; }
+        }
+        p.y = jumpY(p, time);
+        if (p.jump && time > p.jump.start + 2 * p.jump.up) p.jump = null;
+      });
+    }
+
+    // ---------- 時間とイベント ----------
+    // 予定した処理(触る瞬間・ジャンプ・着地など)。scope:
+    //   'flight' … 次の打球が始まったら取り消す(触る予定・その打球に対する動き)
+    //   'rally'  … ラリーが終わったら取り消す(クイックのおとりなど、打球をまたぐ予定)
+    //   'match'  … 取り消さない(得点・次のサーブの準備)
+    let time = 0;
+    let events = [];
+    let flightToken = 0;
+    let rallyToken = 0;
+    function schedule(at, fn, scope) {
+      const e = { at: at, fn: fn, scope: scope || 'flight', flight: flightToken, rally: rallyToken };
+      let i = events.length;
+      while (i > 0 && events[i - 1].at > at) i--;
+      events.splice(i, 0, e);
+    }
+    function processEvents() {
+      while (events.length && events[0].at <= time) {
+        const e = events.shift();
+        if (e.scope === 'flight' && e.flight !== flightToken) continue;
+        if (e.scope !== 'match' && e.rally !== rallyToken) continue;
+        e.fn(e.at);
+      }
+    }
+
+    // ---------- 試合の状態 ----------
+    let servingSide = config.firstServe || 'near';
+    let firstServeOfSet = servingSide;
+    let setNumber = 1;
+    const setResults = [];          // [{ near, far }] 終わったセットの得点
+    let matchWinner = null;
+    let phase = 'between';          // 'between' | 'preServe' | 'serving' | 'rally' | 'dead' | 'setBreak' | 'matchOver'
+    let rallyCount = 0;
+    let lastRally = null;           // { winner, reason }
+    let scoreVersion = 0;
+    let flight = null;              // 飛んでいるボール
+    let ballDead = null;            // ラリー終了後に床に置いておく位置
+    const ballSpin = { x: 0, z: 0 };
+
+    // 操作中のチーム
+    const target = { x: 0, z: 0 };  // サーブ・スパイクの狙い(相手コート)
+    let setChoice = null;           // トス方向の選択中 { zones, zone, quality }
+    let aiming = false;             // 自チームのトスが上がって、スパイクの狙いを決めている間
+    let blockControl = false;       // 相手のトス〜スパイクの間、自チームのMBを左右に動かせる
+    if (control) {
+      const t0 = W(teams[other(control)], 0, HALF_L / 2);
+      target.x = t0.x; target.z = t0.z;
+    }
+
+    // ---------- 打球 ----------
+    // f = { kind, side(打ったチーム), p0, v, t0, landT, crossT?, cross?, netT?, fault?, touchNo, isBlock?, ... }
+    function launch(kind, side, from, to, T, extra, at) {
+      const f = Object.assign({ kind: kind, side: side, p0: { x: from.x, y: from.y, z: from.z }, v: ballistic(from, to, T) }, extra || {});
+      startFlight(f, at);
+      return f;
+    }
+
+    function startFlight(f, at) {
+      flightToken++;
+      flight = f;
+      f.t0 = at;
+      ballDead = null;
+      if (f.kind === 'serveToss') return; // サーブのトス(見た目だけ)
+      f.landT = timeToHeight(f, R);
+      // ネットの面(z=0)を通るか
+      if (Math.abs(f.v.z) > 1e-6) {
+        const tc = -f.p0.z / f.v.z;
+        if (tc > 0.001 && tc < f.landT) {
+          const c = posAt(f, tc);
+          f.crossT = tc;
+          f.cross = c;
+          if (c.y < NET_CLEAR && Math.abs(c.x) <= HALF_W + d.POLE_OUT) f.netT = tc;
+          else if (Math.abs(c.x) > HALF_W) f.fault = 'out'; // アンテナの外を通った
+        }
+      }
+      // レシーブ・トスは、ネットの面へ届く前に味方が触る予定なら自コートのボールとして扱う
+      f.ownFirst = ownContactFirst(f);
+      if (f.netT != null) schedule(at + f.netT, netHit);
+      else {
+        schedule(at + f.landT, landed);
+        if (f.crossT != null && f.kind === 'attack') schedule(at + f.crossT, checkBlock);
+        if (f.crossT != null && !f.ownFirst) schedule(at + f.crossT + 0.15, () => toDefenseBase(teams[f.side]));
+      }
+      if (f.ownFirst || (f.netT == null && !f.fault)) planNext(f, at);
+    }
+
+    function ownContactFirst(f) {
+      if (f.crossT == null) return false;
+      const h = f.kind === 'pass' ? SET_H : (f.kind === 'set' ? f.attacker.ab.attackReach : null);
+      if (h == null) return false;
+      const t = timeToHeight(f, h);
+      return t != null && t < f.crossT;
+    }
+
+    function netHit(at) {
+      const f = flight;
+      const c = f.cross;
+      const back = f.side === 'near' ? 1 : -1; // 打った側へ落ちる
+      emit('net', { kind: f.kind, side: f.side });
+      const nf = { kind: 'netFall', side: f.side, p0: { x: c.x, y: c.y, z: back * (R + 0.05) }, v: { x: 0, y: -0.5, z: back * 0.4 }, fault: 'net', origin: f.kind };
+      flightToken++;
+      flight = nf;
+      nf.t0 = at;
+      nf.landT = timeToHeight(nf, R);
+      schedule(at + nf.landT, landed);
+    }
+
+    function isInCourt(p) {
+      return Math.abs(p.x) <= HALF_W + R && Math.abs(p.z) <= HALF_L + R;
+    }
+
+    function landed(at) {
+      const f = flight;
+      const p = posAt(f, f.landT);
+      ballDead = { x: p.x, y: R, z: p.z };
+      flight = null;
+      let winner, reason;
+      if (f.fault) {
+        winner = other(f.side);
+        reason = f.fault;
+      } else if (isInCourt(p)) {
+        const landSide = p.z >= 0 ? 'near' : 'far';
+        winner = other(landSide);
+        reason = f.kind === 'blockStuff' ? 'block' : (f.kind === 'serve' ? 'ace' : 'in');
+      } else {
+        winner = other(f.side);
+        reason = f.kind === 'blockOut' ? 'blockout' : (f.shank ? 'ace' : 'out');
+      }
+      endRally(winner, reason, at, f.origin || f.kind);
+    }
+
+    // ---------- 次に誰が触るか ----------
+    function planNext(f, at) {
+      if (f.kind === 'blockOut' || f.shank) return;
+      const crosses = f.crossT != null && !f.ownFirst;
+      if (f.kind === 'serve' && !crosses) return;
+      const recvSide = crosses ? other(f.side) : f.side;
+      const T = teams[recvSide];
+      const touchNo = (crosses || f.isBlock) ? 1 : f.touchNo + 1;
+      if (touchNo === 1) {
+        // 相手の打球が外に落ちるなら見送る
+        if (crosses && !isInCourt(shrink(posAt(f, f.landT), OUT_JUDGE_MARGIN))) return;
+        planDig(T, f, at);
+      } else if (touchNo === 2) {
+        planSecond(T, f, at);
+      } else if (f.kind === 'set') {
+        planAttack(T, f, at);
+      } else {
+        planEmergency(T, f, at);
+      }
+    }
+    // 判定用に、コートの内側へ margin だけ寄せた点(ライン際のボールは触りに行く)
+    function shrink(p, margin) {
+      return { x: p.x - Math.sign(p.x) * margin, y: p.y, z: p.z - Math.sign(p.z) * margin };
+    }
+
+    // 触る高さまで落ちてくる時刻と位置。ネットの向こう側で落ちてくる場合は少し後にずらす。
+    function contactPoint(f, h, T) {
+      let t = timeToHeight(f, h);
+      if (t == null) t = f.landT - 0.02;
+      let p = posAt(f, t);
+      if (L(T, p.x, p.z).d < 0.2) { t = Math.max(t, f.landT - 0.05); p = posAt(f, t); }
+      return { t: t, p: p };
+    }
+
+    // 間に合う選手(反応時間・移動・飛びつける距離)。penalty で役割の優先度を付ける。
+    function chooseRunner(candidates, point, tAvail, reaction, at, penalty, reachRate) {
+      let best = null;
+      candidates.forEach(p => {
+        if (airborne(p, at)) return;
+        const need = Math.max(0, hypot2(p, point) - p.ab.reach * (reachRate || 1));
+        const arrive = reaction + need / p.ab.speed;
+        const cost = arrive + (penalty ? penalty(p) : 0);
+        if (!best || cost < best.cost) best = { p: p, arrive: arrive, cost: cost };
+      });
+      if (!best) return null;
+      best.ok = best.arrive <= tAvail;
+      return best;
+    }
+
+    // 1本目(サーブレシーブ・ディグ・チャンスボール)
+    function planDig(T, f, at) {
+      const c = contactPoint(f, PASS_H, T);
+      const isServe = f.kind === 'serve';
+      const penalty = p => {
+        if (p.role === 'S') return 0.3;                         // セッターはなるべく1本目を触らない
+        if (isServe && p.role !== 'L' && p.role !== 'OH') return 0.4; // サーブレシーブはリベロとOHが受ける
+        return 0;
+      };
+      const reaction = isServe ? SERVE_REACTION : REACTION;
+      // サーブはセッターと前衛の非レシーバー(MB・OP)は受けない
+      const cands = isServe ? T.onCourt.filter(p => p.role !== 'S' && (p.slot === 'FL' || !isFrontZone(p.zone))) : T.onCourt;
+      const best = chooseRunner(cands, c.p, c.t, reaction, at, penalty, isServe ? SERVE_REACH_RATE : 1);
+      if (!best) return;
+      const p = best.p;
+      schedule(at + reaction, () => moveTo(p, c.p));
+      if (!best.ok) return; // 間に合わない(走るがボールは落ちる)
+      // セッターはレシーブが上がる前から返球先へ向かう(ペネトレーション)
+      const setter = setterOf(T);
+      if (setter && setter !== p && !airborne(setter, at)) schedule(at + reaction, () => moveLocal(setter, SETTER_TARGET));
+      schedule(at + c.t, cAt => digContact(T, p, f, cAt, best.arrive > c.t - 0.15));
+    }
+
+    function digContact(T, p, f, at, stretched) {
+      const hit = posAt(f, at - f.t0);
+      p.x = hit.x; p.z = hit.z; p.goal = null;
+      T.touches = 1;
+      T.lastToucher = p;
+      // 打球が速い・強いほど返球が乱れる
+      const speed = Math.hypot(f.v.x, f.v.z);
+      let factor;
+      if (f.kind === 'serve') factor = f.serveFactor || 1;
+      else if (f.kind === 'attack') factor = 1.45 + Math.max(0, speed - 20) * 0.04;
+      else if (f.kind === 'blockStuff') factor = 1.6;
+      else if (f.kind === 'blockTouch') factor = 0.8;
+      else factor = 0.6; // フェイント・チャンスボール
+      if (stretched) factor *= 1.25; // 飛びついた
+      if (f.kind === 'serve') {
+        const shank = clamp((p.ab.passError * factor - SHANK_BASE) * SHANK_RATE, 0, SHANK_MAX) + (stretched ? SHANK_STRETCH : 0);
+        if (Math.random() < shank) {
+          // 弾いてコートの外へ(横か後ろ)
+          const sx = Math.random() < 0.5 ? -1 : 1;
+          const out = Math.random() < 0.6 ? W(T, sx * (HALF_W + 1 + Math.random() * 2), L(T, hit.x, hit.z).d + Math.random() * 3)
+            : W(T, (Math.random() * 2 - 1) * 3, HALF_L + 1 + Math.random() * 2);
+          emit('pass', { side: T.side, quality: 'shank', kind: f.kind });
+          launch('pass', T.side, hit, { x: out.x, y: R, z: out.z }, 0.9, { touchNo: 3, shank: true }, at);
+          return;
+        }
+      }
+      const aimXZ = Wp(T, SETTER_TARGET);
+      const aim = { x: aimXZ.x, y: SET_H, z: aimXZ.z };
+      const to = scatter(aim, p.ab.passError * factor);
+      const toL = L(T, to.x, to.z);
+      if (toL.d < SETTER_TARGET.d) { // ネット側へのずれは小さめ
+        const w = W(T, toL.lx, SETTER_TARGET.d - (SETTER_TARGET.d - toL.d) * PASS_NET_SIDE_ERROR);
+        to.x = w.x; to.z = w.z;
+      }
+      const dev = hypot2(to, aim);
+      const quality = dev < 1.0 ? 'A' : (dev < 2.0 ? 'B' : 'C');
+      const isDig = f.kind === 'attack' || f.kind === 'blockStuff';
+      const T_ = (isDig ? 1.35 : 1.15) + hypot2(hit, to) * 0.02;
+      emit('pass', { side: T.side, quality: quality, kind: f.kind });
+      launch('pass', T.side, hit, to, T_, { touchNo: 1, quality: quality }, at);
+    }
+
+    // 2本目(トス)。セッターが間に合えばセッター、だめなら他の選手が二段トス。
+    function planSecond(T, f, at) {
+      const last = T.lastToucher;
+      const setter = setterOf(T);
+      let plan = null;
+      if (setter && setter !== last) {
+        const c = contactPoint(f, SET_H, T);
+        const r = chooseRunner([setter], c.p, c.t, TEAM_REACTION, at);
+        if (r && r.ok) plan = { p: setter, c: c, isSetter: true };
+      }
+      if (!plan) {
+        const c = contactPoint(f, BUMP_SET_H, T);
+        const r = chooseRunner(T.onCourt.filter(p => p !== last), c.p, c.t, TEAM_REACTION, at,
+          p => (p.role === 'L' ? -0.2 : 0)); // リベロが優先して二段トスを上げる
+        if (!r) return;
+        schedule(at + TEAM_REACTION, () => moveTo(r.p, c.p));
+        if (!r.ok) return;
+        plan = { p: r.p, c: c, isSetter: false };
+      } else {
+        schedule(at + TEAM_REACTION, () => moveTo(plan.p, plan.c.p));
+      }
+      const quality = plan.isSetter ? (f.quality || 'B') : 'C';
+      const options = setOptions(T, quality, plan.p);
+      const setAt = at + plan.c.t;
+
+      // Aパスで前衛MBがいればクイックに入る(上がらなければおとり)
+      T.quickPlan = null;
+      if (options.quick) {
+        const mb = options.quick.p;
+        const contactT = setAt + TEMPO.quick;
+        const spot = ATTACK_SPOTS.quick;
+        T.quickPlan = { p: mb, contactT: contactT };
+        schedule(at + TEAM_REACTION, () => approach(mb, spot, contactT, at), 'rally');
+        // 相手(CPU)のMBは一定の確率でクイックにつられて跳ぶ
+        const D = teams[other(T.side)];
+        const dmb = bySlot(D, 'FM');
+        D.mbCommit = null;
+        if (dmb && D.side !== control && Math.random() < CPU_COMMIT_RATE) {
+          D.mbCommit = { landAt: contactT + BLOCK_UP + 0.1 };
+          const q = Wp(T, spot);
+          schedule(setAt, () => moveTo(dmb, { x: q.x, z: D.s * BLOCK_NET_D }, 0.9), 'rally');
+          schedule(contactT - BLOCK_UP, jAt => startJump(dmb, jAt, BLOCK_UP, dmb.ab.jumpHeight * 0.8), 'rally');
+        }
+      }
+      transitionOffense(T, plan.p, at);
+      // 相手チームはブロックに備えて基本の位置へ
+      toDefenseBase(teams[other(T.side)]);
+
+      if (T.side === control) {
+        const zones = uiZones(options);
+        setChoice = { zones: zones, zone: ['center', 'left', 'right'].find(z => zones[z].enabled) || 'left', quality: quality, options: options };
+      }
+      schedule(setAt, sAt => setContact(T, plan, f, options, quality, sAt));
+    }
+
+    // トスの選択肢。キーごとに { p: 打つ選手, spot, tempo, label }
+    function setOptions(T, quality, setterP) {
+      const isSetter = setterP.role === 'S';
+      const o = {};
+      const fl = bySlot(T, 'FL'), fm = bySlot(T, 'FM'), fr = bySlot(T, 'FR');
+      const bm = bySlot(T, 'BM'), br = bySlot(T, 'BR');
+      const ok = p => p && p !== setterP;
+      const high = quality === 'C' || !isSetter;
+      if (ok(fl)) o.left = { p: fl, spot: ATTACK_SPOTS.left, tempo: high ? TEMPO.highC : TEMPO.high, label: 'レフト' };
+      if (ok(fr) && fr.role === 'OP') o.right = { p: fr, spot: ATTACK_SPOTS.right, tempo: high ? TEMPO.highC : TEMPO.back, label: 'ライト' };
+      if (isSetter && quality === 'A' && ok(fm) && fm.role === 'MB') o.quick = { p: fm, spot: ATTACK_SPOTS.quick, tempo: TEMPO.quick, label: 'クイック' };
+      if (isSetter && quality !== 'C' && ok(bm) && bm.role === 'OH') o.pipe = { p: bm, spot: ATTACK_SPOTS.pipe, tempo: TEMPO.pipe, label: 'バック' };
+      if (isSetter && quality !== 'C' && ok(br) && br.role === 'OP') o.bic = { p: br, spot: ATTACK_SPOTS.bic, tempo: TEMPO.pipe, label: 'バックライト' };
+      if (isSetter && quality === 'A' && isFrontZone(setterP.zone)) o.dump = { p: setterP, label: 'ツー' };
+      if (!o.left && !o.right) { // 打てる選手がいなければ、誰でもいいので前衛へ高いトス
+        const any = T.onCourt.find(p => p !== setterP && p.role !== 'L');
+        if (any) o.left = { p: any, spot: ATTACK_SPOTS.left, tempo: TEMPO.highC, label: 'レフト' };
+      }
+      return o;
+    }
+
+    // ジョイスティックの3つのゾーン(レフト/センター/ライト)に割り当てる選択肢
+    function uiZones(o) {
+      const zone = opt => (opt ? { label: opt.label, enabled: true, key: null } : { label: '-', enabled: false, key: null });
+      const left = zone(o.left); left.key = o.left ? 'left' : null;
+      const cKey = o.quick ? 'quick' : (o.pipe ? 'pipe' : null);
+      const center = zone(cKey && o[cKey]); center.key = cKey;
+      const rKey = o.right ? 'right' : (o.bic ? 'bic' : null);
+      const right = zone(rKey && o[rKey]); right.key = rKey;
+      return { left: left, center: center, right: right };
+    }
+
+    // CPU のトスの配分
+    function cpuSetChoice(o, quality) {
+      if (o.dump && Math.random() < CPU_DUMP_RATE) return 'dump';
+      const weights = { left: 3, quick: 2.5, right: 2.5, pipe: 1.2, bic: 1 };
+      if (quality === 'C') { weights.left = 3; weights.right = 1.5; }
+      const keys = Object.keys(weights).filter(k => o[k]);
+      let total = 0;
+      keys.forEach(k => { total += weights[k]; });
+      let r = Math.random() * total;
+      for (const k of keys) { r -= weights[k]; if (r <= 0) return k; }
+      return keys[0];
+    }
+
+    // 1本目を上げた後、攻撃に備えて助走の位置へ(セッター・トスを上げる選手以外)
+    function transitionOffense(T, setterP, at) {
+      T.onCourt.forEach(p => {
+        if (p === setterP || (T.quickPlan && T.quickPlan.p === p)) return;
+        let spot = null;
+        if (p.slot === 'FL') spot = APPROACH_STARTS.left;
+        else if (p.slot === 'FM') spot = APPROACH_STARTS.quick;
+        else if (p.slot === 'FR') spot = p.role === 'OP' ? APPROACH_STARTS.right : BASE.FR;
+        else if (p.slot === 'BM') spot = p.role === 'OH' ? APPROACH_STARTS.pipe : BASE.BM;
+        else if (p.slot === 'BR') spot = p.role === 'OP' ? APPROACH_STARTS.bic : BASE.BR;
+        else spot = { lx: -2.2, d: 5.0 };
+        const delay = p === T.lastToucher ? 0.25 : TEAM_REACTION;
+        schedule(at + delay, () => moveLocal(p, spot));
+      });
+    }
+
+    function toDefenseBase(T) {
+      T.onCourt.forEach(p => {
+        if (control === T.side && p.slot === 'FM' && blockControl) return;
+        moveLocal(p, BASE[p.slot], JOG);
+      });
+    }
+
+    // 助走: 打つ瞬間(contactT)に spot でジャンプの最高点になるように走って跳ぶ
+    function approach(p, spot, contactT, at, worldSpot) {
+      const T = teams[p.side];
+      const c = worldSpot || Wp(T, spot);
+      const take = worldSpot ? { x: c.x, z: c.z + T.s * 0.4 } : Wp(T, { lx: spot.lx, d: spot.d + 0.4 });
+      const jumpAt = contactT - JUMP_UP;
+      const runTime = Math.max(0.05, jumpAt - at);
+      const dist = hypot2(p, take);
+      p.goal = { x: take.x, z: take.z };
+      p.moveSpeed = clamp(dist / runTime, p.ab.speed * 0.6, p.ab.speed * 1.3);
+      schedule(jumpAt, jAt => {
+        startJump(p, jAt, JUMP_UP, p.ab.jumpHeight);
+        moveTo(p, c, 0.5); // 空中で少し前へ流れる
+      }, 'rally');
+    }
+
+    function setContact(T, plan, f, options, quality, at) {
+      const p = plan.p;
+      const hit = posAt(f, at - f.t0);
+      p.x = hit.x; p.z = hit.z; p.goal = null;
+      T.touches = 2;
+      T.lastToucher = p;
+      let key;
+      if (T.side === control && setChoice) key = setChoice.zones[setChoice.zone].key || setChoice.zones.left.key;
+      else key = cpuSetChoice(options, quality);
+      setChoice = null;
+      if (!key || !options[key]) key = options.left ? 'left' : Object.keys(options).find(k => k !== 'dump');
+      emit('set', { side: T.side, key: key, quality: quality });
+      if (key === 'dump') { attackBy(T, p, hit, at, 'tip', 0); return; }
+      const opt = options[key];
+      const attacker = opt.p;
+      const aimXZ = Wp(T, opt.spot);
+      const aim = { x: aimXZ.x, y: attacker.ab.attackReach, z: aimXZ.z };
+      const errScale = plan.isSetter ? (quality === 'A' ? 1 : (quality === 'B' ? 1.25 : 1.6)) : 2.0;
+      const to = scatter(aim, p.ab.tossError * errScale);
+      const toL = L(T, to.x, to.z), aimL = L(T, aim.x, aim.z);
+      if (toL.d < aimL.d) { // ネット側へのずれは小さめ
+        const w = W(T, toL.lx, aimL.d - (aimL.d - toL.d) * PASS_NET_SIDE_ERROR);
+        to.x = w.x; to.z = w.z;
+      }
+      const tempo = key === 'quick' && T.quickPlan ? Math.max(0.3, T.quickPlan.contactT - at) : opt.tempo;
+      launch('set', T.side, hit, to, tempo, { touchNo: 2, attacker: attacker, attackKey: key, setDev: hypot2(to, aim) }, at);
+    }
+
+    // 3本目(スパイク)の準備: 打つ選手の助走、相手のブロックと守備、自チームのカバー
+    function planAttack(T, f, at) {
+      const atk = f.attacker;
+      const tHit = timeToHeight(f, atk.ab.attackReach);
+      const hitT = at + (tHit != null ? tHit : f.landT - 0.05);
+      const hitP = posAt(f, hitT - at);
+      if (f.attackKey !== 'quick') approach(atk, null, hitT, at, hitP);
+      else { atk.goal = { x: hitP.x, z: hitP.z + T.s * 0.2 }; atk.moveSpeed = atk.ab.speed; }
+      if (T.side === control) aiming = true;
+      schedule(hitT, aAt => {
+        aiming = false;
+        const ball = posAt(f, aAt - f.t0);
+        // トスが大きくずれて届かなければ打てない(チャンスボールで返す)
+        const reachable = hypot2(atk, ball) < 1.4 && f.setDev < FREE_BALL_SET_ERROR;
+        atk.x = ball.x; atk.z = ball.z;
+        attackBy(T, atk, ball, aAt, reachable ? 'spike' : 'free', f.setDev);
+      });
+      // 相手のブロック・守備
+      setDefense(teams[other(T.side)], hitP, hitT, at, f.attackKey);
+      // 自チームのカバー
+      coverAttack(T, atk, hitP, at);
+    }
+
+    function setDefense(D, attackP, hitT, at, attackKey) {
+      const a = L(D, attackP.x, attackP.z).lx;
+      const side = a > 1.2 ? 1 : (a < -1.2 ? -1 : 0);
+      const mb = bySlot(D, 'FM');
+      const wing = side > 0 ? bySlot(D, 'FR') : (side < 0 ? bySlot(D, 'FL') : null);
+      const offWing = side > 0 ? bySlot(D, 'FL') : (side < 0 ? bySlot(D, 'FR') : null);
+      const lim = HALF_W - 0.3;
+      const jumpAt = hitT - BLOCK_UP;
+      const blockAt = (p, lx, moveAt) => {
+        const pos = W(D, clamp(lx, -lim, lim), BLOCK_NET_D);
+        schedule(moveAt || at + REACTION, () => moveTo(p, pos, 0.9));
+        schedule(jumpAt, jAt => { if (!airborne(p, jAt)) startJump(p, jAt, BLOCK_UP, p.ab.jumpHeight * 0.8); });
+      };
+      if (wing) blockAt(wing, a + side * 0.2);
+      if (mb) {
+        if (D.side === control) {
+          blockControl = true;
+          schedule(jumpAt, jAt => {
+            blockControl = false;
+            if (!airborne(mb, jAt)) startJump(mb, jAt, BLOCK_UP, mb.ab.jumpHeight * 0.8);
+          });
+        } else if (D.mbCommit && attackKey !== 'quick') {
+          // クイックにつられて跳んだMBは、着地してから遅れて寄る
+          blockAt(mb, side ? a - side * 0.55 : a, Math.max(at + REACTION, D.mbCommit.landAt));
+        } else {
+          blockAt(mb, side ? a - side * 0.55 : a);
+        }
+      }
+      D.mbCommit = null;
+      // フェイント・インナーのカバー(ブロックに跳ばない前衛)
+      const dropped = side ? [offWing] : [bySlot(D, 'FL'), bySlot(D, 'FR')];
+      dropped.forEach(p => {
+        if (!p) return;
+        const lx = side ? -side * 1.6 : (p.slot === 'FL' ? -2.2 : 2.2);
+        schedule(at + REACTION, () => moveLocal(p, { lx: lx, d: 3.2 }));
+      });
+      // 後衛: ストレート・クロス・後ろ
+      const spots = side
+        ? { line: { lx: side * 3.6, d: 5.0 }, cross: { lx: -side * 3.4, d: 5.8 }, deep: { lx: -side * 0.9, d: 8.0 } }
+        : { line: { lx: 3.2, d: 6.0 }, cross: { lx: -3.2, d: 6.0 }, deep: { lx: 0, d: 8.0 } };
+      const lineSlot = side >= 0 ? 'BR' : 'BL';
+      const crossSlot = side >= 0 ? 'BL' : 'BR';
+      [[lineSlot, spots.line], [crossSlot, spots.cross], ['BM', spots.deep]].forEach(([slot, spot]) => {
+        const p = bySlot(D, slot);
+        if (p) schedule(at + REACTION, () => moveLocal(p, spot));
+      });
+    }
+
+    // 自チームが打つ時、残りの選手は打つ選手の周り(ブロックに跳ね返されたボール)をカバーする
+    function coverAttack(T, atk, hitP, at) {
+      const c = L(T, hitP.x, hitP.z);
+      const spots = [
+        { lx: c.lx - 1.4, d: c.d + 1.6 }, { lx: c.lx + 1.4, d: c.d + 1.6 },
+        { lx: c.lx * 0.5, d: c.d + 3.4 }, { lx: c.lx * 0.5 - 2.2, d: 6.2 }, { lx: c.lx * 0.5 + 2.2, d: 6.2 }
+      ].map(s => ({ lx: clamp(s.lx, -HALF_W + 0.3, HALF_W - 0.3), d: clamp(s.d, 1.5, HALF_L - 0.5) }));
+      const free = T.onCourt.filter(p => p !== atk && p !== T.lastToucher && !(T.quickPlan && T.quickPlan.p === p));
+      free.forEach(p => {
+        let best = 0, bestD = Infinity;
+        spots.forEach((s, i) => {
+          if (!s) return;
+          const dd = hypot2(p, Wp(T, s));
+          if (dd < bestD) { bestD = dd; best = i; }
+        });
+        const s = spots[best];
+        spots[best] = null;
+        if (s) schedule(at + 0.3, () => moveLocal(p, s));
+      });
+      // トスを上げた選手もカバーへ寄る
+      if (T.lastToucher && T.lastToucher !== atk) {
+        const sp = T.lastToucher;
+        schedule(at + 0.3, () => moveLocal(sp, { lx: clamp(c.lx * 0.6, -3, 3), d: 2.2 }, JOG));
+      }
+    }
+
+    // 3本目: 打つ。kind: 'spike' | 'tip' | 'free'
+    function attackBy(T, atk, hit, at, kind, setDev) {
+      T.touches = 3;
+      T.lastToucher = atk;
+      const O = teams[other(T.side)];
+      const from = { x: hit.x, y: hit.y, z: hit.z };
+      if (kind === 'free') {
+        emit('attack', { side: T.side, kind: 'free' });
+        const to = W(O, (Math.random() * 2 - 1) * 2.5, 4 + Math.random() * 3.5);
+        launchOver('free', T.side, from, { x: to.x, y: R, z: to.z }, 1.5, 0.6, { touchNo: 3 }, at);
         return;
       }
-
-      receiver.x = landingPoint.x;
-      receiver.z = landingPoint.z;
-      beginReceivePass(receiver);
-      receiver.returnFrom = { x: receiver.x, z: receiver.z };
-      receiver.phase = 'returning';
-      receiver.phaseStart = time;
-    }
-
-    // レシーブ担当がボールに追いついた瞬間、セッター位置へ返球する。
-    function beginReceivePass(receiver) {
-      const from = vec(receiver.x, ball.y, receiver.z);
-      const aim = vec(receiveTargetPlayer.baseX, RECEIVE_TARGET_HEIGHT, receiveTargetPlayer.baseZ);
-      const to = scatter(aim, receiver.passError); // レシーブ精度に応じて返球がずれる
-      beginFlight('receivePass', from, to, RECEIVE_ARC_HEIGHT, RECEIVE_TIME, false);
-    }
-
-    // 相手セッターがレシーブを受け取った瞬間、相手アタッカーへトスを上げる
-    // (近チームの beginNearToss() と対になる、相手側の攻撃シーケンス)。
-    function beginFarToss(fromPoint) {
-      farAttacker = farAttackers[Math.floor(Math.random() * farAttackers.length)];
-      const from = vec(fromPoint.x, fromPoint.y, fromPoint.z);
-      // 攻撃者の定位置から少し内側・ネット寄りへ上げる
-      const inward = farAttacker.baseX < 0 ? 0.3 : (farAttacker.baseX > 0 ? -0.3 : 0);
-      const aim = vec(farAttacker.baseX + inward, TOSS_TARGET_HEIGHT, farAttacker.baseZ - 0.2);
-      const to = scatter(aim, receiveTargetPlayer.tossError); // セッターのトス精度
-      lastTossDeviation = Math.hypot(to.x - aim.x, to.z - aim.z);
-      beginFlight('farToss', from, to, TOSS_ARC_HEIGHT, TOSS_TIME, false);
-      farTossActive = true;
-      farAttacker.attackFromX = farAttacker.x;
-      farAttacker.attackFromZ = farAttacker.z;
-      farAttacker.activity = 'attack';
-      farAttacker.phase = 'approach';
-      farAttacker.phaseStart = time;
-
-      setupNearBlockAndCover(to.x);
-    }
-
-    // こちらのブロック(ネット上で塞いでいる x の範囲)。前衛センターは操作中の位置、
-    // サイドのブロッカーは寄っている先の位置で、それぞれ blockReach の幅を塞ぐ。
-    function nearBlockSpans() {
-      const spans = [];
-      if (nearBlocker.controlActive) {
-        spans.push({ x: nearBlocker.x, reach: nearBlocker.blockReach, power: nearBlocker.blockPower });
+      let aim, tip = kind === 'tip';
+      if (T.side === control) {
+        aim = { x: target.x, y: R, z: target.z };
+        if (L(O, aim.x, aim.z).d < TIP_DEPTH) tip = true;
+      } else {
+        const r = cpuAttackAim(T, O, from, tip);
+        aim = r.aim; tip = r.tip;
       }
-      [leftAttacker, rightAttacker].forEach(p => {
-        if (p.activity === 'block' && p.phase === 'move') {
-          spans.push({ x: p.moveTo.x, reach: p.blockReach, power: p.blockPower });
-        }
-      });
-      return spans;
+      emit('attack', { side: T.side, kind: tip ? 'tip' : 'spike' });
+      if (tip) {
+        launchOver('tip', T.side, from, scatter(aim, 0.35), 0.9, 0.3, { touchNo: 3 }, at);
+        return;
+      }
+      const sigma = atk.ab.spikeError + (setDev || 0) * SET_ERROR_TO_SPIKE;
+      // 狙った所へ白帯の上を通る速さで打つ(近くを狙うほど遅く山なりになる)
+      const g = G + TOPSPIN_SPIKE;
+      let T_ = Math.max(0.12, hypot2(from, aim) / atk.ab.spikeSpeed);
+      for (let i = 0; i < 40 && netClearance(from, aim, T_, g) < SPIKE_NET_MARGIN; i++) T_ += 0.03;
+      const to = scatter(aim, sigma);
+      const v = ballistic(from, to, T_, g);
+      v.y += gaussian() * SPIKE_HEIGHT_ERROR * atk.ab.spikeError;
+      startFlight({ kind: 'attack', side: T.side, p0: from, v: v, g: g, touchNo: 3, attacker: atk }, at);
     }
 
-    // 相手のブロック(こちらの攻撃に対して跳んでいる選手の、寄っている先の位置)。
-    function farBlockSpans() {
-      return farPlayers
-        .filter(p => p.activity === 'block')
-        .map(p => ({ x: p.blockTargetX, reach: p.blockReach, power: p.blockPower }));
+    // 白帯の上を margin 以上あけて越える山なりで打つ(フェイント・チャンスボール)
+    function launchOver(kind, side, from, to, T, margin, extra, at) {
+      let T_ = T;
+      for (let i = 0; i < 40 && netClearance(from, to, T_) < margin; i++) T_ += 0.05;
+      return launch(kind, side, from, to, T_, extra, at);
     }
 
-    // スパイクのコースがブロックの範囲を通るなら、当たり判定をして結果を決める。
-    // 当たった場合は、ボールがネット上(ブロックの位置)に来たところで resolveBlock() が跳ね返りを始める。
-    // blockSide: ブロックしている側('near'|'far')。戻り値: ブロックに当たるなら true。
-    function checkBlock(blockSide, origin, spikeTarget, spans, attackPower) {
-      if (!spans.length || flight.endT < 1) return false;
-      const tNet = clamp(origin.z / (origin.z - spikeTarget.z), 0.02, 0.98);
-      const xAtNet = lerp(origin.x, spikeTarget.x, tNet);
-      let blocker = null;
-      spans.forEach(b => {
-        if (Math.abs(xAtNet - b.x) <= b.reach && (!blocker || Math.abs(xAtNet - b.x) < Math.abs(xAtNet - blocker.x))) {
-          blocker = b;
-        }
-      });
-      if (!blocker) return false;
+    // from から to へ T 秒で打った時、ネットの上を白帯から何m上で通るか
+    function netClearance(from, to, T, g) {
+      const gg = g || G;
+      const v = ballistic(from, to, T, gg);
+      if (Math.abs(v.z) < 1e-6) return Infinity;
+      const tc = -from.z / v.z;
+      if (tc <= 0 || tc >= T) return Infinity;
+      return from.y + v.y * tc - 0.5 * gg * tc * tc - NET_CLEAR;
+    }
 
-      const diff = blocker.power - attackPower;
-      if (Math.random() >= clamp(BLOCK_TOUCH_BASE + diff * 0.01, 0.3, 0.9)) return false; // 当たらず通過
+    // CPU のスパイクの狙い。ブロックで塞がれていないコースのうち、守備から一番遠い所(守備の隙)を狙う。
+    function cpuAttackAim(T, O, from, forceTip) {
+      const blockers = O.onCourt.filter(p => Math.abs(p.z) < 1.2 && (airborne(p, time) || (p.goal && Math.abs(p.goal.z) < 1.0)));
+      const spanX = p => (p.goal && Math.abs(p.goal.z) < 1.0 ? p.goal.x : p.x);
+      const defenders = O.onCourt.filter(p => !blockers.includes(p));
+      const blocked = c => {
+        if (!blockers.length) return false;
+        const t = from.z / (from.z - c.z);
+        const xAt = from.x + (c.x - from.x) * t;
+        return blockers.some(b => Math.abs(xAt - spanX(b)) <= b.ab.blockReach);
+      };
+      const gapOf = c => {
+        let g = Infinity;
+        defenders.forEach(p => { g = Math.min(g, hypot2(c, p.goal || p)); });
+        return g;
+      };
+      const tip = forceTip || Math.random() < CPU_TIP_RATE + (blockers.length >= 2 ? 0.06 : 0);
+      let best = null, bestScore = -Infinity;
+      for (let i = 0; i < CPU_AIM_CANDIDATES; i++) {
+        const lx = (Math.random() * 2 - 1) * (HALF_W - CPU_AIM_MARGIN);
+        const dd = tip ? 1.2 + Math.random() * 1.8 : 2.0 + Math.random() * (HALF_L - 2.0 - CPU_AIM_MARGIN);
+        const w = W(O, lx, dd);
+        const c = { x: w.x, y: R, z: w.z };
+        let score = gapOf(c);
+        if (!tip && blocked(c)) score -= 1000;
+        if (score > bestScore) { bestScore = score; best = c; }
+      }
+      return { aim: best, tip: tip };
+    }
+
+    // 3本目が自コートに残った等の予備(近くの選手がチャンスボールで返す)
+    function planEmergency(T, f, at) {
+      const c = contactPoint(f, PASS_H, T);
+      const r = chooseRunner(T.onCourt.filter(p => p !== T.lastToucher), c.p, c.t, TEAM_REACTION, at);
+      if (!r) return;
+      schedule(at + TEAM_REACTION, () => moveTo(r.p, c.p));
+      if (!r.ok) return;
+      schedule(at + c.t, cAt => {
+        const hit = posAt(f, cAt - f.t0);
+        attackBy(T, r.p, hit, cAt, 'free', 0);
+      });
+    }
+
+    // ---------- ブロック ----------
+    function checkBlock(at) {
+      const f = flight;
+      const c = f.cross;
+      const D = teams[other(f.side)];
+      const blockers = D.onCourt.filter(p => airborne(p, at) && jumpY(p, at) > p.jump.h * 0.5 && Math.abs(p.z) < 1.0 &&
+        Math.abs(c.x - p.x) <= p.ab.blockReach);
+      if (!blockers.length) return;
+      let b = blockers[0];
+      blockers.forEach(q => { if (Math.abs(c.x - q.x) < Math.abs(c.x - b.x)) b = q; });
+      const top = Math.max.apply(null, blockers.map(q => q.ab.blockTop + (jumpY(q, at) - q.jump.h)));
+      if (c.y > top + BLOCK_OVER_MARGIN) return; // ブロックの上を抜けた
+      const atk = f.attacker;
+      const diff = b.ab.blockPower - (atk ? atk.ab.attackPower : 50);
+      if (Math.random() >= clamp(BLOCK_TOUCH_BASE + diff * 0.01 + (blockers.length - 1) * 0.1, 0.3, 0.92)) return;
       const pStuff = clamp(BLOCK_STUFF_BASE + diff * 0.01, 0.1, 0.6);
       const pOut = clamp(BLOCK_OUT_BASE - diff * 0.005, 0.05, 0.3);
       const r = Math.random();
-      const result = r < pStuff ? 'stuff' : (r < pStuff + pOut ? 'out' : 'touch');
-
-      // ネットの上まで飛んだところで止め、そこから跳ね返らせる
-      flight.endT = tNet;
-      flight.duration *= tNet;
-      pendingBlock = { side: blockSide, result: result };
-      return true;
-    }
-
-    // ボールがブロックに当たった瞬間の跳ね返り。
-    //   stuff: 攻撃側のコートのネット際へ叩き落とす(ブロック側の得点)
-    //   touch: ブロック側のコートへ山なりに弾く(ブロック側が拾ってラリー続行)
-    //   out  : ブロック側のコートの外へ弾く(攻撃側の得点。最後に触ったのはブロック側)
-    function resolveBlock(p) {
-      const b = pendingBlock;
-      pendingBlock = null;
-      const into = b.side === 'near' ? 1 : -1; // ブロック側コートの z の向き
-      const from = vec(p.x, p.y, p.z);
-      let to;
-      if (b.result === 'stuff') {
-        to = vec(clamp(p.x + (Math.random() * 2 - 1), -d.COURT_W / 2 + 0.3, d.COURT_W / 2 - 0.3),
-          ballRadius + 0.02, -into * (0.5 + Math.random() * 1.5));
-        beginFlight('blockStuff', from, to, 0.3, 0.5, false, b.side);
-      } else if (b.result === 'touch') {
-        to = vec(clamp(p.x * 0.5 + (Math.random() * 2 - 1) * 1.5, -d.COURT_W / 2 + 0.5, d.COURT_W / 2 - 0.5),
-          ballRadius + 0.02, into * (2 + Math.random() * 4));
-        beginFlight('blockTouch', from, to, 2.4, 1.4, false, b.side);
-        blockTouchSide = b.side;
-        if (b.side === 'near') prepareNearReceive(to); else prepareReceive(to);
+      const A = teams[f.side];
+      const from = { x: c.x, y: Math.max(c.y, NET_CLEAR + 0.05), z: D.s * 0.02 };
+      D.lastToucher = b;
+      emit('block', { side: D.side, result: r < pStuff ? 'stuff' : (r < pStuff + pOut ? 'out' : 'touch') });
+      if (r < pStuff) {
+        // シャット: 攻撃側のネット際へ叩き落とす(3割は弱く跳ね返ってカバーで拾えることがある)
+        const soft = Math.random() < 0.3;
+        const to = W(A, clamp(L(A, c.x, 0).lx + (Math.random() * 2 - 1), -HALF_W + 0.3, HALF_W - 0.3), soft ? 1.5 + Math.random() * 2 : 0.4 + Math.random() * 1.4);
+        launch('blockStuff', D.side, from, { x: to.x, y: R, z: to.z }, soft ? 0.9 : 0.4, { isBlock: true, touchNo: 0 }, at);
+      } else if (r < pStuff + pOut) {
+        const sx = Math.sign(c.x) || (Math.random() < 0.5 ? -1 : 1);
+        const to = { x: sx * (HALF_W + 0.8 + Math.random() * 1.5), y: R, z: D.s * (1 + Math.random() * 6) };
+        launch('blockOut', D.side, { x: c.x, y: c.y, z: D.s * 0.15 }, to, 0.9, { isBlock: true, touchNo: 0 }, at);
       } else {
-        const sideSign = p.x < 0 ? -1 : (p.x > 0 ? 1 : (Math.random() < 0.5 ? -1 : 1));
-        to = vec(sideSign * (d.COURT_W / 2 + 0.8 + Math.random() * 1.5),
-          ballRadius + 0.02, into * (1 + Math.random() * 4));
-        beginFlight('blockOut', from, to, 1.2, 0.9, false, b.side);
+        // ワンタッチ: ブロック側のコートへ山なりに弾く(ブロック側の1本目として拾う)
+        const to = W(D, clamp(L(D, c.x, 0).lx * 0.5 + (Math.random() * 2 - 1) * 1.5, -HALF_W + 0.5, HALF_W - 0.5), 2 + Math.random() * 4.5);
+        launch('blockTouch', D.side, { x: c.x, y: c.y, z: D.s * 0.15 }, { x: to.x, y: R, z: to.z }, 1.4, { isBlock: true, touchNo: 0 }, at);
+        toDefenseBase(A);
       }
     }
 
-    // 打点 origin から点 c へ打った時、ネット(z=0)を通る位置がブロックで塞がれているか。
-    function isBlockedCourse(origin, c, spans) {
-      if (!spans.length || origin.z >= 0 || c.z <= 0) return false;
-      const t = -origin.z / (c.z - origin.z);
-      const xAtNet = lerp(origin.x, c.x, t);
-      return spans.some(b => Math.abs(xAtNet - b.x) <= b.reach);
-    }
-
-    // 相手スパイクの狙い。こちらのコート内(ネットから FAR_AIM_MIN_DEPTH 以上奥、ラインから
-    // FAR_AIM_MARGIN 内側)にランダムな候補を FAR_AIM_CANDIDATES 個作り、ブロックで塞がれていない
-    // コースのうち、レシーブできる選手から一番遠い候補(守備の隙)を狙う(全部塞がれていたら
-    // 塞がれていても一番の隙を狙う)。そこからアタッカーの精度(+トスのずれ)に応じてブレるので、
-    // ブレてアウトやネットになることもある。
-    function farSpikeTarget(origin) {
-      const spans = nearBlockSpans();
-      const defenders = nearReceiveCandidates.filter(canReceive_);
-      let aim = null, bestGap = -Infinity;
-      for (let i = 0; i < FAR_AIM_CANDIDATES; i++) {
-        const c = vec(
-          (Math.random() * 2 - 1) * (d.COURT_W / 2 - FAR_AIM_MARGIN),
-          ballRadius + 0.02,
-          FAR_AIM_MIN_DEPTH + Math.random() * (d.COURT_L / 2 - FAR_AIM_MIN_DEPTH - FAR_AIM_MARGIN)
-        );
-        let gap = Infinity;
-        defenders.forEach(p => { gap = Math.min(gap, Math.hypot(c.x - p.x, c.z - p.z)); });
-        // 塞がれたコースは、塞がれていない候補より必ず後回しにする
-        if (isBlockedCourse(origin, c, spans)) gap -= 1000;
-        if (gap > bestGap) { bestGap = gap; aim = c; }
-      }
-      return scatter(aim, farAttacker.spikeError + lastTossDeviation * TOSS_ERROR_TO_SPIKE);
-    }
-
-    // 相手アタッカーへのトスが届いた瞬間、自動でこちら側のコートへスパイクを打つ。
-    // コート内に落ちる打球なら、こちらのレシーバーが自動で拾いに走る(ラリー継続)。
-    function autoFarSpike(fromPoint) {
-      farTossActive = false;
-      const spikeOrigin = vec(fromPoint.x, fromPoint.y, fromPoint.z);
-      const blockSpans = nearBlockSpans(); // 跳ぶ直前のブロックの位置で判定する
-      const spikeTarget = farSpikeTarget(spikeOrigin);
-      beginFlight('farSpike', spikeOrigin, spikeTarget, SPIKE_ARC_HEIGHT, farAttacker.spikeTime, true);
-      if (flight.endT === 1 && !checkBlock('near', spikeOrigin, spikeTarget, blockSpans, farAttacker.attackPower)) {
-        prepareNearReceive(spikeTarget);
-      }
-
-      // 相手の打つ瞬間に合わせて、サイドのブロッカーも一緒に跳ぶ。
-      [leftAttacker, rightAttacker].forEach(a => {
-        if (a.activity === 'block' && a.phase === 'move') {
-          a.phase = 'jumping';
-          a.phaseStart = time;
-        }
-      });
-
-      // 相手の打つ瞬間に合わせて、操作していた位置でブロックジャンプする。
-      nearBlocker.controlActive = false;
-      nearBlocker.jumpX = nearBlocker.x;
-      nearBlocker.phase = 'jumping';
-      nearBlocker.phaseStart = time;
-    }
-
-    function updateBlocker(state, now) {
-      if (state.activity !== 'block') return;
-      if (state.phase === 'approach') {
-        const elapsed = now - state.phaseStart;
-        const jumpStart = TOSS_TIME - JUMP_DURATION_BLOCK;
-
-        const moveT = Math.min(1, elapsed / TOSS_TIME);
-        state.x = lerp(state.blockFromX, state.blockTargetX, moveT);
-        state.z = state.baseZ;
-
-        if (elapsed < jumpStart) {
-          state.y = 0;
-        } else {
-          const u = Math.min(1, (elapsed - jumpStart) / JUMP_DURATION_BLOCK);
-          state.y = BLOCK_JUMP_HEIGHT * Math.sin(Math.PI / 2 * u);
-        }
-
-        if (elapsed >= TOSS_TIME) {
-          state.phase = 'landing';
-          state.phaseStart = now;
-        }
-      } else if (state.phase === 'landing') {
-        const lt = Math.min(1, (now - state.phaseStart) / LAND_DURATION);
-        state.y = lerp(BLOCK_JUMP_HEIGHT, 0, lt);
-        state.x = state.blockTargetX;
-        if (lt >= 1) {
-          state.phase = 'returning';
-          state.phaseStart = now;
-        }
-      } else if (state.phase === 'returning') {
-        const rt = Math.min(1, (now - state.phaseStart) / BLOCK_RETURN_DURATION);
-        state.x = lerp(state.blockTargetX, state.baseX, rt);
-        state.y = 0;
-        if (rt >= 1) {
-          state.activity = 'idle';
-          state.phase = 'idle';
-          state.x = state.baseX;
-          state.z = state.baseZ;
-        }
-      }
-    }
-
-    function updateReceiver(state, now) {
-      if (state.activity !== 'receive') return;
-      if (state.phase === 'approach') {
-        const t = clamp((now - state.phaseStart) / state.approachDuration, 0, 1);
-        state.x = lerp(state.approachFrom.x, state.approachTo.x, t);
-        state.z = lerp(state.approachFrom.z, state.approachTo.z, t);
-        state.y = 0;
-        if (t >= 1) {
-          state.phase = 'waiting'; // 先回りが完了。ボールが実際に届くまでその場で構える
-        }
-      } else if (state.phase === 'waiting') {
-        // ボールの到着(finalizeReceive)を待つだけ。位置はそのまま。
-      } else if (state.phase === 'returning') {
-        const dist = Math.hypot(state.baseX - state.returnFrom.x, state.baseZ - state.returnFrom.z);
-        const duration = clamp(dist / state.speed, RECEIVE_RETURN_MIN, RECEIVE_RETURN_MAX);
-        const t = Math.min(1, (now - state.phaseStart) / duration);
-        state.x = lerp(state.returnFrom.x, state.baseX, t);
-        state.z = lerp(state.returnFrom.z, state.baseZ, t);
-        if (t >= 1) {
-          state.activity = 'idle';
-          state.phase = 'idle';
-          state.x = state.baseX;
-          state.z = state.baseZ;
-        }
-      }
-    }
-
-    // 攻撃選手の自動助走・ジャンプ(近チームのレフト/センター/ライト、相手チームのアタッカーで共用。
-    // dirZ: 自陣からネットに向かう方向の符号。近チームは -Z 方向、相手は +Z 方向に向かう)。
-    function updateAttack(state, now, dirZ) {
-      if (state.activity !== 'attack') return;
-      if (state.phase === 'approach') {
-        const elapsed = now - state.phaseStart;
-        const jumpStart = TOSS_TIME - JUMP_DURATION_ATTACK;
-        if (elapsed < jumpStart) {
-          // 助走を始めた位置(通常は定位置。レシーブ直後ならその位置)から踏み切り位置へ
-          const rt = elapsed / jumpStart;
-          state.x = lerp(state.attackFromX, state.baseX, rt);
-          state.z = lerp(state.attackFromZ, state.baseZ + dirZ * APPROACH_DIST, rt);
-          state.y = 0;
-        } else {
-          const u = Math.min(1, (elapsed - jumpStart) / JUMP_DURATION_ATTACK);
-          state.x = state.baseX;
-          state.z = state.baseZ + dirZ * APPROACH_DIST;
-          state.y = state.jumpHeight * Math.sin(Math.PI / 2 * u);
-        }
-        if (elapsed >= TOSS_TIME) {
-          state.phase = 'landing';
-          state.phaseStart = now;
-        }
-      } else if (state.phase === 'landing') {
-        const lt = Math.min(1, (now - state.phaseStart) / LAND_DURATION);
-        state.y = lerp(state.jumpHeight, 0, lt);
-        state.z = lerp(state.baseZ + dirZ * APPROACH_DIST, state.baseZ, lt);
-        if (lt >= 1) {
-          state.activity = 'idle';
-          state.phase = 'idle';
-          state.x = state.baseX;
-          state.z = state.baseZ;
-        }
-      }
-    }
-
-    // 相手のトスが上がった瞬間、トスの上がった側の前衛はブロック位置へ寄り、
-    // 反対側の前衛はネットから下がってフェイント/インナーのカバーに入る。
-    // attackX: 相手の打点の x(トスの到達点)。ほぼ中央なら左右どちらも動かない。
-    function setupNearBlockAndCover(attackX) {
-      if (Math.abs(attackX) < 1) return;
-      const wing = attackX < 0 ? leftAttacker : rightAttacker;
-      const opposite = wing === leftAttacker ? rightAttacker : leftAttacker;
-      [wing, opposite].forEach(p => {
-        // 攻撃中・レシーブ中の選手はそのまま(それ以外の動きを優先しない)
-        if (p.activity === 'attack' || (p.activity === 'receive' && p.phase !== 'returning')) return;
-        p.moveFrom = { x: p.x, z: p.z };
-        p.phaseStart = time;
-        if (p === wing) {
-          p.activity = 'block';
-          p.phase = 'move';
-          p.moveTo = { x: clamp(attackX, nearBlockRange.xMin, nearBlockRange.xMax), z: p.baseZ };
-        } else {
-          p.activity = 'cover';
-          p.phase = 'move';
-          p.moveTo = { x: p.baseX * COVER_X_RATIO, z: COVER_DEPTH };
-        }
-      });
-    }
-
-    // サイドの前衛のブロック(寄る→跳ぶ→着地→戻る)とカバー(下がる→構える)の動き。
-    function updateNearWing(state, now) {
-      if (state.activity === 'cover') {
-        const t = Math.min(1, (now - state.phaseStart) / COVER_MOVE_TIME);
-        state.x = lerp(state.moveFrom.x, state.moveTo.x, t);
-        state.z = lerp(state.moveFrom.z, state.moveTo.z, t);
-        state.y = 0;
-        return;
-      }
-      if (state.activity !== 'block') return;
-      if (state.phase === 'move') {
-        const t = Math.min(1, (now - state.phaseStart) / WING_BLOCK_MOVE_TIME);
-        state.x = lerp(state.moveFrom.x, state.moveTo.x, t);
-        state.z = lerp(state.moveFrom.z, state.moveTo.z, t);
-        state.y = 0;
-      } else if (state.phase === 'jumping') {
-        const u = Math.min(1, (now - state.phaseStart) / JUMP_DURATION_BLOCK);
-        state.y = BLOCK_JUMP_HEIGHT * Math.sin(Math.PI / 2 * u);
-        if (u >= 1) { state.phase = 'landing'; state.phaseStart = now; }
-      } else if (state.phase === 'landing') {
-        const lt = Math.min(1, (now - state.phaseStart) / LAND_DURATION);
-        state.y = lerp(BLOCK_JUMP_HEIGHT, 0, lt);
-        if (lt >= 1) {
-          // 着地したら 'receive' の 'returning' で定位置へ戻る
-          state.activity = 'receive';
-          state.phase = 'returning';
-          state.returnFrom = { x: state.x, z: state.z };
-          state.phaseStart = now;
-        }
-      }
-    }
-
-    // 相手のスパイクが決着した(拾った/落ちた/ネット)ら、カバーに入っていた選手を定位置へ戻す。
-    // 跳ばずに終わったブロッカー(ラリー終了時など)も同様に戻す。
-    function releaseNearWings() {
-      [leftAttacker, rightAttacker].forEach(p => {
-        if (p.activity === 'cover' || (p.activity === 'block' && p.phase === 'move')) {
-          p.activity = 'receive';
-          p.phase = 'returning';
-          p.returnFrom = { x: p.x, z: p.z };
-          p.phaseStart = time;
-        }
-      });
-    }
-
-    // 自分側ブロッカー。相手のトス〜スパイクでボールが相手コート側(z<0)にある間は常に
-    // ジョイスティック左右で位置を操作でき、ジャンプ自体(タイミング・高さ)は常に自動
-    // (triggerされた位置で跳ぶだけ)。自チーム自身のスパイクが相手コートへ飛んでいく間は
-    // ブロックとは無関係なので対象外にする。
-    function updateNearBlocker(now, dt, joystickValue) {
-      if (nearBlocker.phase === 'idle') {
-        const isOpponentAttack = flight.kind === 'farToss' || flight.kind === 'farSpike';
-        nearBlocker.controlActive = isOpponentAttack && ball.z < 0 && ball.flightState !== 'idle';
-      }
-
-      if (nearBlocker.controlActive) {
-        nearBlocker.x += joystickValue.x * BLOCK_CONTROL_SPEED * dt;
-        nearBlocker.x = clamp(nearBlocker.x, nearBlockRange.xMin, nearBlockRange.xMax);
-      }
-
-      if (nearBlocker.phase === 'jumping') {
-        const u = Math.min(1, (now - nearBlocker.phaseStart) / JUMP_DURATION_BLOCK);
-        nearBlocker.x = nearBlocker.jumpX;
-        nearBlocker.y = BLOCK_JUMP_HEIGHT * Math.sin(Math.PI / 2 * u);
-        if (u >= 1) {
-          nearBlocker.phase = 'landing';
-          nearBlocker.phaseStart = now;
-        }
-      } else if (nearBlocker.phase === 'landing') {
-        const lt = Math.min(1, (now - nearBlocker.phaseStart) / LAND_DURATION);
-        nearBlocker.x = nearBlocker.jumpX;
-        nearBlocker.y = lerp(BLOCK_JUMP_HEIGHT, 0, lt);
-        if (lt >= 1) {
-          nearBlocker.returnFrom = { x: nearBlocker.x, z: nearBlocker.z };
-          nearBlocker.phase = 'returning';
-          nearBlocker.phaseStart = now;
-        }
-      } else if (nearBlocker.phase === 'returning') {
-        const rt = Math.min(1, (now - nearBlocker.phaseStart) / BLOCK_RETURN_DURATION);
-        nearBlocker.x = lerp(nearBlocker.returnFrom.x, nearBlocker.baseX, rt);
-        nearBlocker.y = 0;
-        if (rt >= 1) {
-          nearBlocker.phase = 'idle';
-          nearBlocker.x = nearBlocker.baseX;
-          nearBlocker.z = nearBlocker.baseZ;
-        }
-      }
-    }
-
-    // ---------- 近チームのレシーブ〜セッター〜トス ----------
-
-    // 相手のスパイクが飛んでくる瞬間(=着地点が決まった瞬間)に、最寄りのレシーバーを先読みで走らせる。
-    let currentNearReceiver = null;
-    // レシーブできる選手: 後衛2人・セッター(コート内にいる時)・前衛レフト/ライト。
-    // 前衛センターはブロッカーを兼ねるので含めない。
-    const nearReceiveCandidates = nearReceivers.concat([nearSetter, leftAttacker, rightAttacker]);
-
-    function prepareNearReceive(landingPoint) {
-      if (!isInCourt(landingPoint, 'near')) return;
-      const pick = nearestReceiver(nearReceiveCandidates, landingPoint);
-      if (!pick) return;
-      const receiver = pick.receiver;
-      const bestDist = pick.dist;
-
-      currentNearReceiver = receiver;
-      receiver.activity = 'receive';
-      receiver.phase = 'approach';
-      receiver.phaseStart = time + REACTION_TIME; // 反応するまではその場で構えたまま
-      receiver.approachFrom = { x: receiver.x, z: receiver.z };
-      receiver.approachTo = { x: landingPoint.x, z: landingPoint.z };
-      receiver.approachDuration = Math.max(bestDist / receiver.speed, RECEIVE_MOVE_MIN);
-    }
-
-    function cancelNearReceive() {
-      releaseNearWings();
-      if (!currentNearReceiver) return;
-      const r = currentNearReceiver;
-      currentNearReceiver = null;
-      r.returnFrom = { x: r.x, z: r.z };
-      r.phase = 'returning';
-      r.phaseStart = time;
-    }
-
-    function finalizeNearReceive(landingPoint) {
-      ball.x = landingPoint.x; ball.y = landingPoint.y; ball.z = landingPoint.z;
-      ball.flightState = 'received';
-
-      const receiver = currentNearReceiver;
-      currentNearReceiver = null;
-      releaseNearWings();
-      if (!receiver || !reachedBall(receiver, landingPoint)) {
-        ball.flightState = 'landed';
-        landedAt = time;
-        if (receiver) {
-          receiver.returnFrom = { x: receiver.x, z: receiver.z };
-          receiver.phase = 'returning';
-          receiver.phaseStart = time;
-        }
-        return;
-      }
-
-      receiver.x = landingPoint.x;
-      receiver.z = landingPoint.z;
-      beginNearReceivePass(receiver);
-      receiver.returnFrom = { x: receiver.x, z: receiver.z };
-      receiver.phase = 'returning';
-      receiver.phaseStart = time;
-    }
-
-    // レシーバーがボールに追いついた瞬間、待機点(passTargetPoint)へ返球する。
-    // 同時にトスを上げる選手がその位置へ走り出し、寄っている間のスティック入力でトス方向を決める。
-    function beginNearReceivePass(receiver) {
-      const from = vec(receiver.x, ball.y, receiver.z);
-      const to = scatter(passTargetPoint, receiver.passError); // レシーブ精度に応じて返球がずれる
-      beginFlight('nearReceivePass', from, to, RECEIVE_ARC_HEIGHT, RECEIVE_TIME, false);
-
-      const setter = chooseNearSetter(receiver);
-      settingPlayer = setter;
-      setter.activity = 'set';
-      setter.phase = 'approach';
-      setter.phaseStart = time;
-      setter.approachFrom = { x: setter.x, z: setter.z };
-      setter.approachTo = { x: to.x, z: to.z }; // 実際に返ってきた位置へ寄る
-      setter.approachDuration = RECEIVE_TIME;
-      pendingTossZone = 'center';
-    }
-
-    // トスを上げる選手。通常はセッター、セッター自身が1本目を拾った時は、残りの後衛のうち
-    // トスが一番うまい(tossError が小さい)選手が代わりに上げる。
-    function chooseNearSetter(receiver) {
-      if (receiver !== nearSetter) return nearSetter;
-      let best = null;
-      nearReceivers.forEach(p => {
-        if (p === receiver) return;
-        if (!best || p.tossError < best.tossError) best = p;
-      });
-      return best || nearSetter;
-    }
-
-    // トスを上げる選手がボールに寄っている間、ジョイスティックの左右でトス方向を決め、
-    // 到達した瞬間にその方向の攻撃者へトスを上げる。上げた後は自分の守備位置へ戻る。
-    function updateNearSetting(now, joystickValue) {
-      const setter = settingPlayer;
-      if (!setter || setter.activity !== 'set') return;
-      // スティックがレフト/ライトへ倒された瞬間にその方向を確定させ、指を離して
-      // ニュートラルに戻っても選択が消えないようにする(センターへは明示的に戻した時だけ)。
-      const zone = zoneFromJoystickX(joystickValue.x);
-      if (zone !== 'center') {
-        pendingTossZone = zone;
-      }
-
-      const t = Math.min(1, (now - setter.phaseStart) / setter.approachDuration);
-      setter.x = lerp(setter.approachFrom.x, setter.approachTo.x, t);
-      setter.z = lerp(setter.approachFrom.z, setter.approachTo.z, t);
-      setter.y = 0;
-      if (t >= 1) {
-        beginNearToss(pendingTossZone, setter);
-        settingPlayer = null;
-        setter.activity = 'receive'; // 'receive' の 'returning' で守備位置へ戻る
-        setter.phase = 'returning';
-        setter.returnFrom = { x: setter.x, z: setter.z };
-        setter.phaseStart = now;
-      }
-    }
-
-    // トスを上げる瞬間、確定した方向の攻撃者へトスを上げる。
-    function beginNearToss(zone, setter) {
-      const attacker = attackersByZone[zone] || centerAttacker;
-      currentNearAttacker = attacker;
-      const from = vec(setter.x, SETTER_HEIGHT, setter.z);
-      const aim = attackTargets[zone] || attackTargets.center;
-      const to = scatter(aim, setter.tossError); // トスを上げる選手の精度
-      lastTossDeviation = Math.hypot(to.x - aim.x, to.z - aim.z);
-      beginFlight('toss', from, to, TOSS_ARC_HEIGHT, TOSS_TIME, false);
-      tossActive = true;
-      attacker.attackFromX = attacker.x;
-      attacker.attackFromZ = attacker.z;
-      attacker.activity = 'attack';
-      attacker.phase = 'approach';
-      attacker.phaseStart = time;
-      setupFarBlock(to.x);
-    }
-
-    // こちらのトスが上がった瞬間、相手のセンター(far-front-2)と、打点側の前衛(far-front-1 / far-front-3)が
-    // 打点へ寄ってブロックに跳ぶ(打つ瞬間にジャンプのピークが来る)。センターは打点の内側に並ぶ。
-    function setupFarBlock(attackX) {
-      const center = farPlayers.find(p => p.name === 'far-front-2');
-      const wing = farPlayers.find(p => p.name === (attackX < 0 ? 'far-front-1' : 'far-front-3'));
-      const range = d.COURT_W / 2 - BLOCK_SIDE_MARGIN;
-      [wing, center].forEach(p => {
-        if (!p) return;
-        const isWing = p === wing && Math.abs(attackX) >= 1;
-        if (p === wing && !isWing) return; // ほぼ中央への攻撃ならセンター1枚
-        p.activity = 'block';
-        p.phase = 'approach';
-        p.phaseStart = time; // 打つ瞬間に合わせてブロックのジャンプもピークにする
-        p.blockFromX = p.x;
-        const inward = attackX < 0 ? 0.7 : -0.7;
-        p.blockTargetX = clamp(isWing ? attackX : (Math.abs(attackX) >= 1 ? attackX + inward : attackX), -range, range);
-      });
-    }
-
-    // セッターをコートの守備位置へ入らせる(サーブを打った後・相手の攻撃から始まる練習の時)。
-    function setterEnterCourt() {
-      nearSetter.activity = 'receive'; // 'receive' の 'returning' で守備位置(baseX/Z)へ走る
-      nearSetter.phase = 'returning';
-      nearSetter.returnFrom = { x: nearSetter.x, z: nearSetter.z };
-      nearSetter.phaseStart = time;
-    }
-
-    // ラリーが終わったら、セッター(サーバー)は次のサーブのためにサーブ位置へ戻る。
-    function setterToServe() {
-      releaseNearWings();
-      settingPlayer = null;
-      nearSetter.activity = 'toServe';
-      nearSetter.phase = 'returning';
-      nearSetter.returnFrom = { x: nearSetter.x, z: nearSetter.z };
-      nearSetter.phaseStart = time;
-    }
-
-    function updateSetterToServe(now) {
-      if (nearSetter.activity !== 'toServe') return;
-      const from = nearSetter.returnFrom;
-      const dist = Math.hypot(nearSetter.serveX - from.x, nearSetter.serveZ - from.z);
-      const duration = clamp(dist / nearSetter.speed, RECEIVE_RETURN_MIN, RECEIVE_RETURN_MAX);
-      const t = Math.min(1, (now - nearSetter.phaseStart) / duration);
-      nearSetter.x = lerp(from.x, nearSetter.serveX, t);
-      nearSetter.z = lerp(from.z, nearSetter.serveZ, t);
-      nearSetter.y = 0;
-      if (t >= 1) {
-        nearSetter.activity = 'idle';
-        nearSetter.phase = 'idle';
-      }
-    }
-
-    // ---------- 外部コマンド ----------
-    function canServe() { return ball.flightState === 'idle'; }
-    function canReceive() { return ball.flightState === 'idle'; }
+    // ---------- サーブ ----------
+    function canServe() { return phase === 'preServe' && servingSide === control; }
 
     function serve() {
       if (!canServe()) return;
-      // 狙った位置から、サーバーの精度に応じてブレる
-      const landing = scatter(vec(target.x, ballRadius + 0.02, target.z), serveError);
-      beginFlight('serve', serveOrigin, landing, SERVE_ARC_HEIGHT, serveTime, true);
-      prepareReceive(landing); // 着地点が決まった瞬間、相手選手を先回りさせる
-      // サーバー(セッター)はサーブ位置から打ち、そのままコートの守備位置へ入る
-      nearSetter.x = nearSetter.serveX;
-      nearSetter.z = nearSetter.serveZ;
-      setterEnterCourt();
+      beginServe(time, { x: target.x, y: R, z: target.z });
     }
 
-    // 相手コートからボールが飛んでくる(練習用トリガー)。自チームが受けて拾う。
-    function incomingAttack() {
-      if (!canReceive()) return;
-      const origin = vec(farAttacker.baseX, TOSS_TARGET_HEIGHT, farAttacker.baseZ - 0.2);
-      const nearX = (Math.random() * 2 - 1) * (d.COURT_W / 2 - 1);
-      const nearZ = 1 + Math.random() * (d.COURT_L / 2 - 2);
-      const landing = vec(nearX, ballRadius + 0.02, nearZ);
-      beginFlight('incomingSpike', origin, landing, SPIKE_ARC_HEIGHT, farAttacker.spikeTime, true);
-      setterEnterCourt(); // セッターも守備位置へ(着地点の判定はこの時点の位置で行う)
-      prepareNearReceive(landing);
+    function cpuServe(at) {
+      if (phase !== 'preServe') return;
+      const O = teams[other(servingSide)];
+      let best = null, bestScore = -Infinity;
+      for (let i = 0; i < 5; i++) {
+        const w = W(O, (Math.random() * 2 - 1) * 3.8, 3.0 + Math.random() * 5.7);
+        let g = Infinity;
+        O.onCourt.forEach(p => { g = Math.min(g, hypot2(w, p)); });
+        if (g > bestScore) { bestScore = g; best = w; }
+      }
+      beginServe(at, { x: best.x, y: R, z: best.z });
+    }
+
+    function beginServe(at, aim) {
+      const T = teams[servingSide];
+      const sv = serverOf(T);
+      phase = 'serving';
+      rallyToken++;
+      // トスを上げる(ジャンプサーブは助走して跳ぶ)
+      const hand = { x: sv.x, y: HAND_H, z: sv.z - T.s * 0.3 };
+      const contactH = sv.ab.jumpServe ? sv.ab.attackReach - 0.15 : FLOAT_SERVE_H;
+      const contactZ = sv.ab.jumpServe ? sv.z - T.s * 1.2 : sv.z - T.s * 0.3;
+      const contact = { x: sv.x, y: contactH, z: contactZ };
+      launch('serveToss', T.side, hand, contact, SERVE_TOSS_TIME, {}, at);
+      if (sv.ab.jumpServe) {
+        moveTo(sv, { x: sv.x, z: contactZ + T.s * 0.2 }, 0.6);
+        schedule(at + SERVE_TOSS_TIME - JUMP_UP, jAt => startJump(sv, jAt, JUMP_UP, sv.ab.jumpHeight * 0.85));
+      }
+      schedule(at + SERVE_TOSS_TIME, cAt => serveContact(T, sv, contact, aim, cAt));
+    }
+
+    function serveContact(T, sv, from, aim, at) {
+      phase = 'rally';
+      T.touches = 3;
+      T.lastToucher = sv;
+      const to = scatter(aim, sv.ab.serveError);
+      const dist = hypot2(from, to);
+      const g = sv.ab.jumpServe ? G + TOPSPIN_JUMP_SERVE : G;
+      let T_ = dist / sv.ab.serveSpeed;
+      // ネットを越えるまで山なりにする(狙った所へ入れる打ち方)
+      for (let i = 0; i < 60 && netClearance(from, to, T_, g) < 0.25; i++) T_ += 0.04;
+      const v = ballistic(from, to, T_, g);
+      v.y += gaussian() * 0.35 * sv.ab.serveError; // 打ち出しの高さのブレ(ネット・オーバーの原因)
+      const speed = Math.hypot(v.x, v.z);
+      const f = {
+        kind: 'serve', side: T.side, p0: from, v: v, g: g, touchNo: 3,
+        wobble: !sv.ab.jumpServe,
+        serveFactor: sv.ab.jumpServe ? 1.5 + Math.max(0, speed - 18) * 0.08 : 1.5 + Math.max(0, speed - 14) * 0.06
+      };
+      emit('serve', { side: T.side, jump: sv.ab.jumpServe });
+      startFlight(f, at);
+      // サーブを打ったらサーバーはコートへ入り、全員が専門の位置へ移る
+      schedule(at + 0.3, () => toDefenseBase(T));
+    }
+
+    // ---------- ラリーの終わり・得点 ----------
+    function endRally(winner, reason, at, kind) {
+      if (phase !== 'rally' && phase !== 'serving') return;
+      phase = 'dead';
+      rallyCount++;
+      lastRally = { winner: winner, reason: reason };
+      emit('rally', { winner: winner, reason: reason, serving: servingSide, kind: kind });
+      setChoice = null;
+      aiming = false;
+      blockControl = false;
+      rallyToken++;
+      schedule(at + DEAD_HOLD, aAt => awardPoint(winner, aAt), 'match');
+    }
+
+    function awardPoint(winner, at) {
+      const Wt = teams[winner];
+      const Lt = teams[other(winner)];
+      Wt.points++;
+      if (servingSide !== winner) { // サイドアウト: ローテーションしてサーブ権を取る
+        Wt.rot++;
+        servingSide = winner;
+      }
+      const finalSet = setNumber === rules.setsToWin * 2 - 1;
+      const need = finalSet ? rules.finalSetPoints : rules.setPoints;
+      scoreVersion++;
+      if (Wt.points >= need && Wt.points - Lt.points >= 2) {
+        Wt.sets++;
+        setResults.push({ near: teams.near.points, far: teams.far.points });
+        if (Wt.sets >= rules.setsToWin) {
+          matchWinner = winner;
+          phase = 'matchOver';
+          return;
+        }
+        phase = 'setBreak';
+        schedule(at + SET_BREAK, nAt => {
+          setNumber++;
+          teams.near.points = 0; teams.far.points = 0;
+          teams.near.rot = 0; teams.far.rot = 0;
+          firstServeOfSet = other(firstServeOfSet); // セットごとに最初のサーブを交代
+          servingSide = firstServeOfSet;
+          scoreVersion++;
+          preparePoint(nAt);
+        }, 'match');
+        return;
+      }
+      preparePoint(at);
+    }
+
+    // 次のサーブの準備: リベロの交代、サーブ前の陣形へ歩く
+    function preparePoint(at) {
+      phase = 'between';
+      flight = null;
+      ballDead = null;
+      rallyToken++;
+      arrangeTeam(teams.near);
+      arrangeTeam(teams.far);
+      formation(teams[servingSide], true);
+      formation(teams[other(servingSide)], false);
+      schedule(at + BETWEEN_POINTS, rAt => {
+        phase = 'preServe';
+        if (servingSide !== control) schedule(rAt + CPU_SERVE_DELAY, cpuServe, 'match');
+      }, 'match');
+    }
+
+    function formation(T, serving) {
+      const bench = T.members.filter(p => !p.onCourt);
+      bench.forEach((p, i) => moveTo(p, W(T, -(HALF_W + 1.3), 3.5 + i * 0.9), JOG));
+      if (serving) {
+        T.onCourt.forEach(p => {
+          moveLocal(p, p.zone === 1 ? SERVE_SPOT : ZONE_SPOT[p.zone], JOG);
+        });
+        return;
+      }
+      // サーブレシーブ: 前衛OH・リベロ(か後衛MB)・後衛OHの3人で受ける。他は邪魔にならない所へ。
+      const recv = { FL: { lx: -2.9, d: 5.6 }, BL: { lx: 0, d: 6.4 }, BM: { lx: 2.9, d: 5.8 } };
+      T.onCourt.forEach(p => {
+        let spot;
+        if (recv[p.slot]) spot = recv[p.slot];
+        else if (p.role === 'S' && !isFrontZone(p.zone)) spot = { lx: 2.4, d: 3.0 }; // 後衛セッターは前へ隠れてすぐ返球先へ
+        else if (isFrontZone(p.zone)) spot = { lx: ZONE_SPOT[p.zone].lx, d: 1.0 };
+        else spot = { lx: ZONE_SPOT[p.zone].lx, d: 8.6 };
+        moveLocal(p, spot, JOG);
+      });
     }
 
     // ---------- 毎フレーム更新 ----------
-    // joystickValue: {x, y} 各 -1〜1。ジョイスティックは「倒した方向にカーソルが進む」速度入力として扱う。
+    // joystickValue: {x, y} 各 -1〜1
     function update(dt, joystickValue) {
+      const joy = joystickValue || { x: 0, y: 0 };
       time += dt;
-      const now = time;
+      processEvents();
+      handleControls(dt, joy);
+      updatePlayers(dt);
+      if (flight) {
+        ballSpin.x += dt * 9;
+        ballSpin.z += dt * 6;
+      }
+    }
 
-      // ---- ボールの飛行 ----
-      if (ball.flightState === 'flying') {
-        const progress = Math.min(1, (now - flight.start) / flight.duration);
-        const t = progress * flight.endT;
-        const p = sampleParabola(t);
-        ball.x = p.x; ball.y = p.y; ball.z = p.z;
-        ball.rotX += dt * 9;
-        ball.rotZ += dt * 6;
-        if (progress >= 1) {
-          if (pendingBlock) {
-            resolveBlock(p);
-          } else if (flight.endT < 1) {
-            ball.flightState = 'netFalling';
-            netFault = true;
-            netFall = { from: p.y, x: p.x, z: p.z, start: now };
-            cancelReceive();
-            cancelNearReceive();
-          } else if (tossActive) {
-            autoSpike(p);
-          } else if (farTossActive) {
-            autoFarSpike(p);
-          } else if (flight.kind === 'serve' || flight.kind === 'spike') {
-            finalizeReceive(p);
-          } else if (flight.kind === 'incomingSpike' || flight.kind === 'farSpike') {
-            finalizeNearReceive(p);
-          } else if (flight.kind === 'blockTouch') {
-            // ワンタッチで弾いたボールは、ブロックした側が拾う
-            if (blockTouchSide === 'near') finalizeNearReceive(p); else finalizeReceive(p);
-          } else if (flight.kind === 'receivePass') {
-            beginFarToss(p);
-          } else if (flight.kind === 'nearReceivePass') {
-            // トスを上げる選手の寄り到達(updateNearSetting)に合わせて beginNearToss が呼ばれるため、
-            // ここでは通常の着地扱いにしておく(実際にはその前にトス飛行へ上書きされる想定)。
-            ball.flightState = 'landed';
-            landedAt = now;
-          } else {
-            ball.flightState = 'landed';
-            landedAt = now;
-          }
-        }
-      } else if (ball.flightState === 'netFalling') {
-        const ft = now - netFall.start;
-        const y = Math.max(ballRadius, netFall.from - 0.5 * GRAVITY * ft * ft);
-        ball.x = netFall.x; ball.y = y; ball.z = netFall.z;
-        ball.rotX += dt * 9;
-        ball.rotZ += dt * 6;
-        if (y <= ballRadius) {
-          ball.flightState = 'landed';
-          landedAt = now;
-        }
-      } else if (ball.flightState === 'landed') {
-        if (now - landedAt > LANDED_HOLD) {
-          ball.flightState = 'idle';
-          tossActive = false; // 打たれずにトスが終わったら、スパイクは打てなくする
-          // ラリー終了。次のサーブに備えてボールをサーブ位置へ戻す。
-          ball.x = serveOrigin.x; ball.y = serveOrigin.y; ball.z = serveOrigin.z;
+    function handleControls(dt, joy) {
+      if (!control) return;
+      const T = teams[control];
+      if (setChoice) {
+        // レフト/ライトへ倒すとその方向、上下に倒すとセンター(倒して離しても選択は残る)
+        const zone = joy.x <= -1 / 3 ? 'left' : (joy.x >= 1 / 3 ? 'right' : (Math.abs(joy.y) > 0.5 ? 'center' : null));
+        if (zone && setChoice.zones[zone].enabled) setChoice.zone = zone;
+      }
+      if (canServe() || aiming) {
+        const O = teams[other(control)];
+        const sq = discToSquare(joy.x, joy.y);
+        target.x += sq.x * T.s * 4 * dt;
+        target.z += -sq.y * T.s * 4 * dt; // 上に倒すと奥へ
+        const loc = L(O, target.x, target.z);
+        const w = W(O, clamp(loc.lx, -(HALF_W + 1), HALF_W + 1), clamp(loc.d, 0.3, HALF_L + 1));
+        target.x = w.x; target.z = w.z;
+      }
+      if (blockControl) {
+        const mb = bySlot(T, 'FM');
+        if (mb && !airborne(mb, time)) {
+          mb.goal = null;
+          const lim = HALF_W - 0.3;
+          mb.x = clamp(mb.x + joy.x * T.s * BLOCK_CONTROL_SPEED * dt, -lim, lim);
+          const dz = T.s * BLOCK_NET_D - mb.z;
+          mb.z += clamp(dz, -mb.ab.speed * dt, mb.ab.speed * dt);
         }
       }
+    }
 
-      // ---- 自チーム攻撃選手(レフト/センター/ライト)の自動助走・ジャンプ ----
-      [leftAttacker, centerAttacker, rightAttacker].forEach(a => updateAttack(a, now, -1));
-      // ---- 前衛レフト/ライトのブロック・カバー ----
-      [leftAttacker, rightAttacker].forEach(a => updateNearWing(a, now));
-
-      // ---- 自チームのレシーブ(後衛2人・セッター・前衛レフト/ライト) ----
-      nearReceiveCandidates.forEach(p => updateReceiver(p, now));
-
-      // ---- トスを上げる選手(寄り＋方向確定)、セッターのサーブ位置への移動 ----
-      updateNearSetting(now, joystickValue);
-      updateSetterToServe(now);
-
-      // ---- 相手チーム(ブロック/レシーブ/アタック)の自動アクション ----
-      farPlayers.forEach(p => {
-        updateBlocker(p, now);
-        updateReceiver(p, now);
-        updateAttack(p, now, 1); // 相手は自陣(-Z)からネット(z=0)に向かうので +方向
-      });
-
-      // ---- 自分側ブロッカー ----
-      updateNearBlocker(now, dt, joystickValue);
-
-      // ---- ラリーの勝敗 ----
-      // ボールが落ちた(landed)時点で記録する。セッターへの返球が着地扱いになった直後に
-      // トスで上書きされるケースがあるので、各選手の更新が済んだここで判定する。
-      if (ball.flightState === 'landed' && !rallyResolved) {
-        resolveRally();
-        setterToServe();
+    function ballPos() {
+      if (flight) {
+        const t = time - flight.t0;
+        const end = flight.kind === 'serveToss' ? Infinity : (flight.netT != null ? flight.netT : flight.landT);
+        const p = posAt(flight, Math.min(t, end));
+        if (flight.wobble && flight.landT) { // フローターサーブの揺れ(見た目だけ。始点と着地点は変えない)
+          const u = clamp(t / flight.landT, 0, 1);
+          p.x += 0.18 * Math.sin(Math.PI * u) * Math.sin(5 * Math.PI * u);
+        }
+        return p;
       }
-
-      // ---- 狙い位置マーカー ----
-      // 「サーブ待ち(idle)」または「トスが上がってスパイクの狙いを決めている間(tossActive)」
-      // だけスティックで動かす。ブロック操作中や、セッターがボールに寄っている間(その間は
-      // スティックがトス方向選択に使われる)は動かさない。この判定は上記の各更新(特に
-      // tossActiveをONにするupdateNearSettingと、controlActiveを決めるupdateNearBlocker)の
-      // あとに行うことで、トスが上がった当フレームから即座に操作できるようにしている。
-      if (!nearBlocker.controlActive && (ball.flightState === 'idle' || tossActive)) {
-        const sq = discToSquare(joystickValue.x, joystickValue.y);
-        target.x += sq.x * MARKER_SPEED * dt;
-        target.z += -sq.y * MARKER_SPEED * dt; // yプラス=奥へ進む
-        target.x = clamp(target.x, serveRange.xMin, serveRange.xMax);
-        target.z = clamp(target.z, serveRange.zFar, serveRange.zNet);
-      }
+      if (ballDead) return ballDead;
+      const sv = serverOf(teams[servingSide]);
+      const T = teams[servingSide];
+      return sv ? { x: sv.x, y: HAND_H, z: sv.z - T.s * 0.3 } : { x: 0, y: HAND_H, z: 0 };
     }
 
     function getState() {
-      // near-front-2 はセンター攻撃者とブロッカーを兼任するスロット。攻撃動作中はその座標を、
-      // それ以外はブロッカーの座標を優先して出す(両者は時間的に排他)。
-      const centerSlot = centerAttacker.phase !== 'idle'
-        ? { x: centerAttacker.x, y: centerAttacker.y, z: centerAttacker.z }
-        : { x: nearBlocker.x, y: nearBlocker.y, z: nearBlocker.z };
-
+      const ball = ballPos();
+      const scoreOf = T => ({ points: T.points, sets: T.sets });
       return {
+        time: time,
         target: { x: target.x, z: target.z },
-        // 狙い位置カーソルは、サーブ待ち(idle)かスパイクの狙いを決めている間(tossActive)だけ表示する。
-        targetVisible: ball.flightState === 'idle' || tossActive,
-        ball: { x: ball.x, y: ball.y, z: ball.z, rotX: ball.rotX, rotZ: ball.rotZ, flightState: ball.flightState },
-        leftAttacker: { x: leftAttacker.x, y: leftAttacker.y, z: leftAttacker.z },
-        centerAttacker: centerSlot,
-        rightAttacker: { x: rightAttacker.x, y: rightAttacker.y, z: rightAttacker.z },
-        nearSetter: { x: nearSetter.x, y: nearSetter.y, z: nearSetter.z },
-        nearReceivers: nearReceivers.map(p => ({ name: p.name, x: p.x, y: p.y, z: p.z })),
-        tossZone: settingPlayer && settingPlayer.activity === 'set' ? pendingTossZone : null,
-        farPlayers: farPlayers.map(p => ({ name: p.name, x: p.x, y: p.y, z: p.z })),
+        targetVisible: canServe() || aiming,
+        ball: { x: ball.x, y: ball.y, z: ball.z, rotX: ballSpin.x, rotZ: ballSpin.z },
+        players: allPlayers.map(p => {
+          // コート内の選手はボールの方を向く(ベンチの選手はコートの方)
+          const tx = p.onCourt ? ball.x : 0;
+          const tz = p.onCourt ? ball.z : p.z;
+          let yaw = Math.atan2(tx - p.x, tz - p.z);
+          if (!p.onCourt) yaw = Math.atan2(-p.x, 0);
+          return { id: p.id, x: p.x, y: p.y, z: p.z, yaw: yaw, onCourt: p.onCourt, role: p.role, slot: p.slot };
+        }),
         canServe: canServe(),
-        canReceive: canReceive(),
+        setChoice: setChoice ? {
+          zones: {
+            left: { label: setChoice.zones.left.label, enabled: setChoice.zones.left.enabled },
+            center: { label: setChoice.zones.center.label, enabled: setChoice.zones.center.enabled },
+            right: { label: setChoice.zones.right.label, enabled: setChoice.zones.right.enabled }
+          },
+          active: setChoice.zone,
+          quality: setChoice.quality
+        } : null,
+        blockControl: blockControl,
+        phase: phase,
+        servingSide: servingSide,
+        setNumber: setNumber,
+        setResults: setResults.slice(),
+        score: { near: scoreOf(teams.near), far: scoreOf(teams.far) },
+        scoreVersion: scoreVersion,
         rallyCount: rallyCount,
-        lastRally: lastRally
+        lastRally: lastRally,
+        matchWinner: matchWinner
       };
     }
+
+    // 最初のサーブの準備(最初から陣形の位置に立たせておく)
+    preparePoint(0);
+    allPlayers.forEach(p => { if (p.goal) { p.x = p.goal.x; p.z = p.goal.z; p.goal = null; } });
 
     return {
       update: update,
       serve: serve,
-      receive: incomingAttack,
       canServe: canServe,
-      canReceive: canReceive,
       getState: getState
     };
   }
 
-  global.VolleyballSimulation = Object.freeze({ create: create });
+  global.VolleyballSimulation = Object.freeze({
+    create: create,
+    ROLE_ORDER: ROLE_ORDER
+  });
 })(window);

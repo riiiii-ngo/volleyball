@@ -12,20 +12,35 @@
   function init(options) {
     const container = options.container;
     const serveBtn = options.serveBtn;
-    const receiveBtn = options.receiveBtn;
     const joystickParent = options.joystickParent || document.body;
-    // 出場チーム(VolleyballData.getTeam() の結果)。members の slot で3Dモデルの立ち位置と対応させる。
+    // 出場チーム(VolleyballData.getTeam() の結果)。members の slot(デッキの枠)で役割とサーブ順が決まる。
     const nearTeam = options.nearTeam;
     const farTeam = options.farTeam;
-    // ラリーの勝敗が決まるたびに呼ばれる({ winner:'near'|'far', reason:'in'|'out'|'net' })。
+    // ラリーの勝敗が決まるたびに呼ばれる(result: { winner:'near'|'far', reason }, state: getState() の結果)。
     const onRallyEnd = options.onRallyEnd || null;
+    // 得点・セット・試合の終わりが変わるたびに呼ばれる(state)。
+    const onScore = options.onScore || null;
 
-    // スロットに入っているキャラクターのステータスを、試合で使う能力値(速さ等)に変換する。
-    // スロットが空ならステータス標準値(50)の選手として扱う。
-    function abilityOf(team, slot) {
-      const member = team && team.members.find(m => m.slot === slot);
-      return VolleyballStats.toPlayParams(member ? member.character.stats : null);
+    // デッキの枠 → 役割とサーブ順(5-1システム: S→OH1→MB1→OP→OH2→MB2、リベロは別)
+    const SLOT_ROLES = {
+      se: { role: 'S', order: 0 }, ws1: { role: 'OH', order: 1 }, mb1: { role: 'MB', order: 2 },
+      op: { role: 'OP', order: 3 }, ws2: { role: 'OH', order: 4 }, mb2: { role: 'MB', order: 5 },
+      li: { role: 'L', order: null }
+    };
+
+    // チームの選手を試合用の形にする。ステータスと身長を、試合で使う能力値(速さ・打点等)に変換する。
+    function simTeam(team, side) {
+      return {
+        rotationStart: team.rotationStart || 1,
+        members: team.members.filter(m => SLOT_ROLES[m.slot]).map(m => ({
+          id: side + '-' + m.slot,
+          role: SLOT_ROLES[m.slot].role,
+          order: SLOT_ROLES[m.slot].order,
+          ability: VolleyballStats.toPlayParams(m.character.stats, m.character.height)
+        }))
+      };
     }
+    const simTeams = { near: simTeam(nearTeam, 'near'), far: simTeam(farTeam, 'far') };
 
     const d = VolleyballCourt.DIMENSIONS;
 
@@ -77,9 +92,16 @@
     const court = VolleyballCourt.create();
     scene.add(court);
 
-    // ---------- 選手モデルの読み込み（6人×2チーム） ----------
-    const players = VolleyballPlayers.create();
+    // ---------- 選手モデル（6人+リベロ×2チーム） ----------
+    const players = VolleyballPlayers.create({
+      teams: {
+        near: simTeams.near.members.map(m => ({ id: m.id, libero: m.role === 'L' })),
+        far: simTeams.far.members.map(m => ({ id: m.id, libero: m.role === 'L' }))
+      }
+    });
     scene.add(players);
+    const playerMeshes = new Map();
+    players.traverse(obj => { if (obj.name && /^(near|far)-/.test(obj.name)) playerMeshes.set(obj.name, obj); });
 
     // ---------- ボール ----------
     const ball = VolleyballBall.create();
@@ -120,76 +142,16 @@
     const joystick = VolleyballJoystick.create({ parent: joystickParent });
 
     // ---------- 試合ロジック(Simulation) ----------
-    const server = players.getObjectByName('near-server'); // 後衛ライト＝セッター固定
-    const leftAttacker = players.getObjectByName('near-front-1');
-    const centerAttacker = players.getObjectByName('near-front-2'); // センター攻撃者とブロッカーを兼任
-    const rightAttacker = players.getObjectByName('near-front-3');
-    const nearBack1 = players.getObjectByName('near-back-1');
-    const nearBack2 = players.getObjectByName('near-back-2');
-
-    // 相手チーム6人。ブロックはセンター(far-front-2)と、こちらの攻撃側の前衛(far-front-1/3)が跳ぶ。
-    // レシーブはこの6人の中から、落下点に最も近い選手をSimulation側で毎回自動選出する。
-    // 速さ等の能力は各スロットのキャラクターのステータスから決まる(abilityOf)。
-    const FAR_PLAYER_ROSTER = [
-      { name: 'far-front-1', slot: 'front-1' },
-      { name: 'far-front-2', slot: 'front-2' },
-      { name: 'far-front-3', slot: 'front-3' },
-      { name: 'far-back-1', slot: 'back-1' },
-      { name: 'far-back-2', slot: 'back-2' },
-      { name: 'far-back-3', slot: 'back-3' }
-    ];
-    const farPlayerObjs = FAR_PLAYER_ROSTER.map(p => players.getObjectByName(p.name));
-    const nearBack1Ability = abilityOf(nearTeam, 'back-1');
-    const nearBack2Ability = abilityOf(nearTeam, 'back-2');
-
     const simulation = VolleyballSimulation.create({
       dimensions: d,
       ballRadius: VolleyballBall.RADIUS,
-      serverPos: { x: server.position.x, z: server.position.z },
-      leftAttackerPos: { x: leftAttacker.position.x, z: leftAttacker.position.z },
-      centerAttackerPos: { x: centerAttacker.position.x, z: centerAttacker.position.z },
-      rightAttackerPos: { x: rightAttacker.position.x, z: rightAttacker.position.z },
-      attackers: {
-        left: abilityOf(nearTeam, 'front-1'),
-        center: abilityOf(nearTeam, 'front-2'),
-        right: abilityOf(nearTeam, 'front-3')
-      },
-      serveTime: abilityOf(nearTeam, 'server').serveTime,
-      serveError: abilityOf(nearTeam, 'server').serveError,
-      // サーバーがセッターを兼任。サーブ後は後衛ライト(後衛と同じ深さ)に入って守る
-      setter: abilityOf(nearTeam, 'server'),
-      setterCourtPos: { x: server.position.x, z: nearBack1.position.z },
-      nearReceivers: [
-        { name: 'near-back-1', pos: { x: nearBack1.position.x, z: nearBack1.position.z },
-          speed: nearBack1Ability.speed, reach: nearBack1Ability.reach,
-          passError: nearBack1Ability.passError, tossError: nearBack1Ability.tossError },
-        { name: 'near-back-2', pos: { x: nearBack2.position.x, z: nearBack2.position.z },
-          speed: nearBack2Ability.speed, reach: nearBack2Ability.reach,
-          passError: nearBack2Ability.passError, tossError: nearBack2Ability.tossError }
-      ],
-      farPlayers: farPlayerObjs.map((obj, i) => {
-        const ability = abilityOf(farTeam, FAR_PLAYER_ROSTER[i].slot);
-        return {
-          name: FAR_PLAYER_ROSTER[i].name,
-          pos: { x: obj.position.x, z: obj.position.z },
-          speed: ability.speed,
-          reach: ability.reach,
-          jumpHeight: ability.jumpHeight,
-          spikeTime: ability.spikeTime,
-          spikeError: ability.spikeError,
-          passError: ability.passError,
-          tossError: ability.tossError,
-          blockReach: ability.blockReach,
-          blockPower: ability.blockPower,
-          attackPower: ability.attackPower
-        };
-      })
+      teams: simTeams,
+      controlSide: 'near',
+      onEvent: options.onEvent || null
     });
 
     const onServe = () => simulation.serve();
-    const onReceive = () => simulation.receive();
     serveBtn.addEventListener('click', onServe);
-    receiveBtn.addEventListener('click', onReceive);
 
     // ---------- 背景の壁（環境。モデル本体には含めない） ----------
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x11161c, roughness: 0.9 });
@@ -224,25 +186,26 @@
       ball.rotation.x = state.ball.rotX;
       ball.rotation.z = state.ball.rotZ;
 
-      leftAttacker.position.set(state.leftAttacker.x, state.leftAttacker.y, state.leftAttacker.z);
-      centerAttacker.position.set(state.centerAttacker.x, state.centerAttacker.y, state.centerAttacker.z);
-      rightAttacker.position.set(state.rightAttacker.x, state.rightAttacker.y, state.rightAttacker.z);
-      server.position.set(state.nearSetter.x, state.nearSetter.y, state.nearSetter.z);
-      nearBack1.position.set(state.nearReceivers[0].x, state.nearReceivers[0].y, state.nearReceivers[0].z);
-      nearBack2.position.set(state.nearReceivers[1].x, state.nearReceivers[1].y, state.nearReceivers[1].z);
-
-      farPlayerObjs.forEach((obj, i) => {
-        const p = state.farPlayers[i];
-        obj.position.set(p.x, p.y, p.z);
+      state.players.forEach(p => {
+        const mesh = playerMeshes.get(p.id);
+        if (!mesh) return;
+        mesh.position.set(p.x, p.y, p.z);
+        // 向きはなめらかに変える(急に振り向かない)
+        let diff = p.yaw - mesh.rotation.y;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        mesh.rotation.y += diff * 0.25;
       });
 
       serveBtn.disabled = !state.canServe;
-      receiveBtn.disabled = !state.canReceive;
-      joystick.setActiveZone(state.tossZone);
+      joystick.setZones(state.setChoice ? state.setChoice.zones : null);
+      joystick.setActiveZone(state.setChoice ? state.setChoice.active : null);
+      joystick.setCaption(state.setChoice ? state.setChoice.quality + 'パス  トスを選ぶ'
+        : (state.blockControl ? 'ブロック  左右に動かす' : ''));
     }
 
     let rafId = 0;
     let lastRallyCount = 0;
+    let lastScoreVersion = -1;
     function animate() {
       rafId = requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);
@@ -251,7 +214,11 @@
       applyState(state);
       if (state.rallyCount !== lastRallyCount) {
         lastRallyCount = state.rallyCount;
-        if (onRallyEnd) onRallyEnd(state.lastRally);
+        if (onRallyEnd) onRallyEnd(state.lastRally, state);
+      }
+      if (state.scoreVersion !== lastScoreVersion) {
+        lastScoreVersion = state.scoreVersion;
+        if (onScore) onScore(state);
       }
       renderer.render(scene, camera);
     }
@@ -261,7 +228,6 @@
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
       serveBtn.removeEventListener('click', onServe);
-      receiveBtn.removeEventListener('click', onReceive);
       joystick.destroy();
       // ジオメトリ/マテリアル/テクスチャを解放(画面を行き来してもGPUメモリが増えないように)
       scene.traverse(obj => {

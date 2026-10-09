@@ -1,8 +1,7 @@
 /**
  * VolleyballPlayers モデル
- * 選手（簡易ローポリ人型）を6人×2チーム、コート上の定位置に配置するモジュール。
- * THREE.js のグローバル(THREE)と VolleyballCourt.DIMENSIONS にのみ依存する。
- * ゲーム側は VolleyballPlayers.create() で Group を取得し、自分の scene に add するだけで良い。
+ * 選手（簡易ローポリ人型）のメッシュを、チームごと(6人+リベロ)に作るモジュール。
+ * THREE.js のグローバル(THREE)にのみ依存する。立ち位置は持たない(毎フレーム VolleyballGame が置く)。
  */
 (function (global) {
   'use strict';
@@ -15,9 +14,6 @@
     TORSO_R: 0.19,
     HEAD_R: 0.13
   });
-
-  // コート上の6ポジション（センター寄りのオフセット。x: 左-3 / 中央0 / 右+3）
-  const FORMATION_X = [-3, 0, 3];
 
   function makePlayer(jerseyColor, skinColor) {
     const group = new THREE.Group();
@@ -59,79 +55,40 @@
   }
 
   /**
-   * @param {Object} [options]
+   * 選手のメッシュを id ごとに作る。立ち位置・向きは毎フレーム VolleyballGame が試合の状態から決める。
+   * @param {Object} options
+   * @param {{near: Array<{id:string, libero?:boolean}>, far: Array<{id:string, libero?:boolean}>}} options.teams
    * @param {number} [options.teamNearColor] - 手前チーム（自陣）のジャージ色
    * @param {number} [options.teamFarColor]  - 奥チーム（相手陣）のジャージ色
+   * @param {number} [options.liberoNearColor] - 手前チームのリベロのジャージ色(リベロは違う色を着る)
+   * @param {number} [options.liberoFarColor]
    * @param {number} [options.skinColor]
-   * @returns {THREE.Group} 'VolleyballPlayers' という名前の Group（12人 = 6人×2チーム）
+   * @returns {THREE.Group} 'VolleyballPlayers' という名前の Group。子の名前が選手の id
    */
   function create(options) {
     const opt = Object.assign({
       teamNearColor: 0x2b6fd1,
       teamFarColor: 0xd1352b,
+      liberoNearColor: 0xe8d44d,
+      liberoFarColor: 0x1fae7a,
       skinColor: 0xe0ac6a
     }, options || {});
 
-    const d = (global.VolleyballCourt && global.VolleyballCourt.DIMENSIONS) || {
-      ATTACK_LINE_DIST: 3, COURT_L: 18
-    };
-
     const group = new THREE.Group();
     group.name = 'VolleyballPlayers';
-
-    const frontZ = 1.5;                          // ネットから1.5m（自陣前衛）
-    const backZ = d.COURT_L / 2 - 1.5;            // ベースラインの1.5m内側（自陣後衛）
-    const serveZ = d.COURT_L / 2 + 1.2;           // ベースラインの1.2m外側（サーブ位置）
-    // 自陣の後衛は左・中央の2人。右後衛の位置にはサーブを打った後のサーバー(セッター兼任)が入る
-    // (x=+3、同じ深さ。位置は VolleyballSimulation の setterCourtPos)。
-    const nearBackX = [-3, 0];
-    const nearBackZ = d.COURT_L / 2 - 2;
-
-    // ---------- 手前チーム（自陣・サーブ側。ネットの方を向く = -Z方向） ----------
-    // 3人が前衛、2人が後衛、1人（右後衛=ポジション1）はサーブのためベースライン外に立つ。
-    const nearTeam = new THREE.Group();
-    nearTeam.name = 'team-near';
-
-    FORMATION_X.forEach((x, i) => {
-      const front = makePlayer(opt.teamNearColor, opt.skinColor);
-      front.position.set(x, 0, frontZ);
-      front.rotation.y = Math.PI; // -Z を向く
-      front.name = 'near-front-' + (i + 1);
-      nearTeam.add(front);
+    ['near', 'far'].forEach(side => {
+      const teamGroup = new THREE.Group();
+      teamGroup.name = 'team-' + side;
+      (opt.teams[side] || []).forEach(m => {
+        const color = m.libero
+          ? (side === 'near' ? opt.liberoNearColor : opt.liberoFarColor)
+          : (side === 'near' ? opt.teamNearColor : opt.teamFarColor);
+        const mesh = makePlayer(color, opt.skinColor);
+        mesh.name = m.id;
+        teamGroup.add(mesh);
+      });
+      group.add(teamGroup);
     });
-
-    nearBackX.forEach((x, i) => {
-      const back = makePlayer(opt.teamNearColor, opt.skinColor);
-      back.position.set(x, 0, nearBackZ);
-      back.rotation.y = Math.PI;
-      back.name = 'near-back-' + (i + 1);
-      nearTeam.add(back);
-    });
-
-    const server = makePlayer(opt.teamNearColor, opt.skinColor);
-    server.position.set(3, 0, serveZ);
-    server.rotation.y = Math.PI;
-    server.name = 'near-server';
-    nearTeam.add(server);
-
-    group.add(nearTeam);
-
-    // ---------- 奥チーム（相手陣・ネットの方を向く = +Z方向） ----------
-    const farTeam = new THREE.Group();
-    farTeam.name = 'team-far';
-    FORMATION_X.forEach((x, i) => {
-      const front = makePlayer(opt.teamFarColor, opt.skinColor);
-      front.position.set(x, 0, -frontZ);
-      front.name = 'far-front-' + (i + 1); // デフォルトで +Z を向く
-      farTeam.add(front);
-
-      const back = makePlayer(opt.teamFarColor, opt.skinColor);
-      back.position.set(x, 0, -backZ);
-      back.name = 'far-back-' + (i + 1);
-      farTeam.add(back);
-    });
-    group.add(farTeam);
-
     return group;
   }
 

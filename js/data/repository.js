@@ -20,7 +20,7 @@
  * ソースが実装するメソッド(すべて Promise を返す):
  *   loadCharacters()        → Array<{ id, name, kana?, romaji?, rarity?, level?, position, number?, height?, stats,
  *                                     minStats? }>   stats は試合用8項目、minStats は ALL_STATS の Lv1 の値
- *   loadTeams()             → Array<{ id, name, deckId?, deckSlots?, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
+ *   loadTeams()             → Array<{ id, name, deckId?, deckSlots?, rotationStart?, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
  *                               自チーム('player')は deckId(使うデッキ)と deckSlots({ 試合の立ち位置: デッキの枠 })も返す
  *                               playerCharacterId はその枠の所持選手(player_characters)の ID
  *   loadGachas()            → Array<{ id, name, startAt, endAt|null, currencyType, currencyItemId|null, currencyItemName?,
@@ -584,6 +584,7 @@
       return Object.freeze({
         id: String(raw.id),
         name: raw.name || raw.id,
+        rotationStart: raw.rotationStart || 1,
         members: Object.freeze(members)
       });
     });
