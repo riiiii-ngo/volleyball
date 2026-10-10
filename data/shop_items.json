@@ -6,6 +6,8 @@
     {"shop_item_id": "s_scout_ticket_coin", "item_id": "i_scout_ticket", "quantity": 1, "currency_type": "coin", "currency_item_id": null, "price": 3000},
     {"shop_item_id": "s_scout_ticket_token", "item_id": "i_scout_ticket", "quantity": 1, "currency_type": "item", "currency_item_id": "i_practice_token", "price": 50},
     {"shop_item_id": "s_premium_ticket", "item_id": "i_premium_ticket", "quantity": 1, "currency_type": "paid_diamond", "currency_item_id": null, "price": 300},
-    {"shop_item_id": "s_exp_ticket_1", "item_id": "i_exp_ticket_1", "quantity": 1, "currency_type": "free", "currency_item_id": null, "price": 0}
+    {"shop_item_id": "s_exp_ticket_1", "item_id": "i_exp_ticket_1", "quantity": 1, "currency_type": "free", "currency_item_id": null, "price": 0},
+    {"shop_item_id": "s_exp_ticket_2", "item_id": "i_exp_ticket_2", "quantity": 1, "currency_type": "free", "currency_item_id": null, "price": 0},
+    {"shop_item_id": "s_exp_ticket_3", "item_id": "i_exp_ticket_3", "quantity": 1, "currency_type": "free", "currency_item_id": null, "price": 0}
   ]
 }

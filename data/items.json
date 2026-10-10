@@ -5,6 +5,8 @@
     {"item_id": "i_scout_ticket", "item_type": "gacha_ticket", "item_name": "スカウトチケット", "effect_value": null},
     {"item_id": "i_premium_ticket", "item_type": "gacha_ticket", "item_name": "★4以上確定スカウトチケット", "effect_value": null},
     {"item_id": "i_practice_token", "item_type": "token", "item_name": "練習トークン", "effect_value": null},
-    {"item_id": "i_exp_ticket_1", "item_type": "exp_ticket", "item_name": "経験値チケットLv1", "effect_value": 50}
+    {"item_id": "i_exp_ticket_1", "item_type": "exp_ticket", "item_name": "経験値チケットLv1", "effect_value": 50},
+    {"item_id": "i_exp_ticket_2", "item_type": "exp_ticket", "item_name": "経験値チケットLv2", "effect_value": 250},
+    {"item_id": "i_exp_ticket_3", "item_type": "exp_ticket", "item_name": "経験値チケットLv3", "effect_value": 1000}
   ]
 }
