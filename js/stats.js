@@ -36,7 +36,7 @@
     // サーブとパワーが高い選手はジャンプサーブ、それ以外はフローター
     const jumpServe = serve + power >= 130;
     return {
-      speed: 3.3 + stat(stats, 'speed') * 0.02,              // 移動速度(m/秒)  50→4.3 / 75→4.8
+      speed: 2.8 + stat(stats, 'speed') * 0.03,              // 移動速度(m/秒)  25→3.55 / 50→4.3 / 75→5.05 / 99→5.77
       reach: 0.6 + stat(stats, 'receive') * 0.005,           // 飛びつける距離(m) 50→0.85 / 85→1.03
       jumpHeight: jump,
       attackReach: standingReach + jump,                     // スパイクの打点(m)  180cm・50→3.14

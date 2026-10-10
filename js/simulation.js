@@ -47,6 +47,7 @@
   const REACTION = 0.25;       // 相手が打ってから動き出すまで
   const SERVE_REACTION = 0.3;  // サーブが打たれてから動き出すまで
   const SERVE_REACH_RATE = 0.8; // サーブレシーブは体の正面で受けるので、飛びつける距離をこの割合にする
+  const DIG_REACH_TOLERANCE = 0.1; // 触る瞬間の距離の判定のゆとり(フレームの区切りで届かなくならないように)
   // サーブレシーブを弾いてしまう(コートの外へ飛ぶ=サービスエース)確率
   //   clamp((レシーブのブレ×サーブの難しさ − SHANK_BASE) × SHANK_RATE, 0, SHANK_MAX)、飛びついた時は + SHANK_STRETCH
   const SHANK_BASE = 0.9;
@@ -557,12 +558,16 @@
       if (setter && setter !== p && !airborne(setter, at)) schedule(at + reaction, () => moveLocal(setter, SETTER_TARGET));
       const stretched = best.arrive > c.t - 0.15;
       act(p, stretched ? 'dive' : 'pass', at + c.t);
-      schedule(at + c.t, cAt => digContact(T, p, f, cAt, stretched));
+      schedule(at + c.t, cAt => digContact(T, p, f, cAt, stretched, isServe ? SERVE_REACH_RATE : 1));
     }
 
-    function digContact(T, p, f, at, stretched) {
+    // reachRate: 飛びつける距離に掛ける割合(サーブレシーブは体の正面で受けるので小さい)
+    function digContact(T, p, f, at, stretched, reachRate) {
       const hit = posAt(f, at - f.t0);
-      p.x = hit.x; p.z = hit.z; p.goal = null;
+      // レシーバーは走ってきた位置のまま触る(ボールの所へ瞬間移動しない)。
+      // 触る瞬間に飛びつける距離に入っていなければ届かない(ボールはそのまま落ちる)
+      if (hypot2(p, hit) > p.ab.reach * (reachRate || 1) + DIG_REACH_TOLERANCE) return;
+      p.goal = null;
       T.touches = 1;
       T.lastToucher = p;
       act(p, stretched ? 'dive' : 'pass', at);
