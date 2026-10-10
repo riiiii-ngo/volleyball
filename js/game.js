@@ -12,7 +12,7 @@
   'use strict';
 
   // 操作する場面(トス方向・スパイクの狙い・ブロック)に使える実時間(秒)。この間はスローになる
-  const CONTROL_SECONDS = 2;
+  const CONTROL_SECONDS = 2.5;
   const MIN_TIME_SCALE = 0.05;
 
   function init(options) {

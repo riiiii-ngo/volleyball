@@ -522,12 +522,13 @@
     }
 
     // 間に合う選手(反応時間・移動・飛びつける距離)。penalty で役割の優先度を付ける。
+    // reaction は秒、または選手ごとの反応時間を返す関数
     function chooseRunner(candidates, point, tAvail, reaction, at, penalty, reachRate) {
       let best = null;
       candidates.forEach(p => {
         if (airborne(p, at)) return;
         const need = Math.max(0, hypot2(p, point) - p.ab.reach * (reachRate || 1));
-        const arrive = reaction + need / p.ab.speed;
+        const arrive = (typeof reaction === 'function' ? reaction(p) : reaction) + need / p.ab.speed;
         const cost = arrive + (penalty ? penalty(p) : 0);
         if (!best || cost < best.cost) best = { p: p, arrive: arrive, cost: cost };
       });
@@ -545,12 +546,14 @@
         if (isServe && p.role !== 'L' && p.role !== 'OH') return 0.4; // サーブレシーブはリベロとOHが受ける
         return 0;
       };
-      const reaction = isServe ? SERVE_REACTION : REACTION;
+      // スパイクなどは選手のレシーブの値で反応の速さが変わる(サーブは飛んでくる時間が長いので一律)
+      const reactionOf = p => (isServe ? SERVE_REACTION : (p.ab.digReaction != null ? p.ab.digReaction : REACTION));
       // サーブはセッターと前衛の非レシーバー(MB・OP)は受けない
       const cands = isServe ? T.onCourt.filter(p => p.role !== 'S' && (p.slot === 'FL' || !isFrontZone(p.zone))) : T.onCourt;
-      const best = chooseRunner(cands, c.p, c.t, reaction, at, penalty, isServe ? SERVE_REACH_RATE : 1);
+      const best = chooseRunner(cands, c.p, c.t, reactionOf, at, penalty, isServe ? SERVE_REACH_RATE : 1);
       if (!best) return;
       const p = best.p;
+      const reaction = reactionOf(p);
       schedule(at + reaction, () => moveTo(p, c.p));
       if (!best.ok) return; // 間に合わない(走るがボールは落ちる)
       // セッターはレシーブが上がる前から返球先へ向かう(ペネトレーション)
@@ -899,7 +902,8 @@
           if (s !== near) { moveTo(s.p, s.spot); return; }
           const dx = aim.x - s.spot.x, dz = aim.z - s.spot.z;
           const len = Math.hypot(dx, dz);
-          const k = len > 0 ? Math.min(DIG_READ * len, DIG_READ_MAX) / len : 0;
+          const read = s.p.ab.digRead != null ? s.p.ab.digRead : DIG_READ; // レシーブの値が高いほど大きく寄る
+          const k = len > 0 ? Math.min(read * len, DIG_READ_MAX) / len : 0;
           moveTo(s.p, { x: s.spot.x + dx * k, z: s.spot.z + dz * k });
         });
       });

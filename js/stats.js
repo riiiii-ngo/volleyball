@@ -37,7 +37,11 @@
     const jumpServe = serve + power >= 130;
     return {
       speed: 2.8 + stat(stats, 'speed') * 0.03,              // 移動速度(m/秒)  25→3.55 / 50→4.3 / 75→5.05 / 99→5.77
-      reach: 0.6 + stat(stats, 'receive') * 0.005,           // 飛びつける距離(m) 50→0.85 / 85→1.03
+      reach: 0.5 + stat(stats, 'receive') * 0.008,           // 飛びつける距離(m) 30→0.74 / 50→0.9 / 99→1.29
+      // スパイクのレシーブ:打たれてから動き出すまで(秒) 30→0.28 / 50→0.23 / 99→0.1
+      digReaction: Math.max(0.1, 0.35 - stat(stats, 'receive') * 0.0025),
+      // 打つ選手の向き(狙い)を読んで寄る割合 30→0.27 / 50→0.35 / 99→0.55
+      digRead: 0.15 + stat(stats, 'receive') * 0.004,
       jumpHeight: jump,
       attackReach: standingReach + jump,                     // スパイクの打点(m)  180cm・50→3.14
       blockTop: standingReach + jump * 0.85 + 0.05,          // ブロックの手の高さ(m)
