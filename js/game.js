@@ -42,6 +42,8 @@
           id: side + '-' + m.slot,
           role: SLOT_ROLES[m.slot].role,
           order: SLOT_ROLES[m.slot].order,
+          number: m.character.number,
+          height: m.character.height,
           ability: VolleyballStats.toPlayParams(m.character.stats, m.character.height)
         }))
       };
@@ -101,8 +103,8 @@
     // ---------- 選手モデル（6人+リベロ×2チーム） ----------
     const players = VolleyballPlayers.create({
       teams: {
-        near: simTeams.near.members.map(m => ({ id: m.id, libero: m.role === 'L' })),
-        far: simTeams.far.members.map(m => ({ id: m.id, libero: m.role === 'L' }))
+        near: simTeams.near.members.map(m => ({ id: m.id, libero: m.role === 'L', number: m.number, height: m.height })),
+        far: simTeams.far.members.map(m => ({ id: m.id, libero: m.role === 'L', number: m.number, height: m.height }))
       }
     });
     scene.add(players);
@@ -205,7 +207,10 @@
     // ---------- 描画ループ ----------
     const clock = new THREE.Clock();
 
-    function applyState(state) {
+    // 構える場面(サーブを待つ〜ラリーの間)。サーバー以外のコート上の選手が腰を落とす
+    const READY_PHASES = { preServe: true, serving: true, rally: true };
+
+    function applyState(state, simDt) {
       targetMarker.position.set(state.target.x, 0.05, state.target.z);
       targetMarker.visible = state.targetVisible;
 
@@ -216,11 +221,20 @@
       state.players.forEach(p => {
         const mesh = playerMeshes.get(p.id);
         if (!mesh) return;
+        const moved = Math.hypot(p.x - mesh.position.x, p.z - mesh.position.z);
         mesh.position.set(p.x, p.y, p.z);
         // 向きはなめらかに変える(急に振り向かない)
         let diff = p.yaw - mesh.rotation.y;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         mesh.rotation.y += diff * 0.25;
+        // 体の動き(走る・構える・レシーブ・トス・スパイク・ブロック・サーブ)
+        VolleyballPlayers.animate(mesh, {
+          dt: simDt,
+          moved: moved < 1.5 ? moved : 0, // 陣形の入れ替えで瞬間移動した時は走らせない
+          ready: p.onCourt && !p.server && !!READY_PHASES[state.phase],
+          airborne: p.y > 0.02,
+          action: p.action
+        });
       });
 
       serveBtn.disabled = !state.canServe;
@@ -263,7 +277,7 @@
       simulation.update(realDt * scale, joystick.value, realDt);
       state = simulation.getState();
       if (!state.control) slow = null;
-      applyState(state);
+      applyState(state, realDt * scale);
       applyTimer();
       if (state.rallyCount !== lastRallyCount) {
         lastRallyCount = state.rallyCount;
