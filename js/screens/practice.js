@@ -4,6 +4,8 @@
  * (タイトル/メニューの表示を重くしないため)。離れる時は VolleyballGame の destroy() で
  * 描画ループと WebGL を確実に止める。
  * 出場チームは VolleyballData から読む(自チーム 'player'、相手 'cpu')。
+ * #/practice/tournament/<トーナメントID> で開くと、トーナメントの次の試合になる(相手と試合のルールは大会から。
+ *   結果は VolleyballData.recordTournamentMatch で記録し、終わったらトーナメント画面へ戻る。途中で戻った試合は記録しない)。
  * 試合は2セット先取(25点・最終セット15点、2点差)。得点・セット数・サーブ権を上部に表示し、
  * 試合が終わったら結果(もう一度 / メニューへ)を出す(試合では経験値は入らない。レベルは経験値チケットでだけ上がる)。
  */
@@ -68,17 +70,34 @@
       let disposed = false;
       let shownSets = 0;
 
-      el.querySelector('.vb-back-btn').addEventListener('click', () => app.go('menu', ['match']));
-      el.querySelector('.court-result-menu').addEventListener('click', () => app.go('menu', ['match']));
+      // トーナメントの試合か(#/practice/tournament/<ID>)
+      const tournamentId = args[0] === 'tournament' ? args[1] : null;
+      let tournament = null;
+      const goBack = () => (tournamentId ? app.go('tournament', [tournamentId]) : app.go('menu', ['match']));
+      if (tournamentId) {
+        el.querySelector('.vb-back-btn').textContent = '‹ トーナメント';
+        el.querySelector('.court-result-menu').textContent = 'トーナメントへ';
+        el.querySelector('.court-result-again').hidden = true;
+      }
+      el.querySelector('.vb-back-btn').addEventListener('click', goBack);
+      el.querySelector('.court-result-menu').addEventListener('click', goBack);
       el.querySelector('.court-result-again').addEventListener('click', () => {
         resultEl.hidden = true;
         startGame();
       });
 
+      // 相手チームとルール(トーナメントなら次の試合の相手・大会のルール)
+      const opponent = tournamentId
+        ? VolleyballData.getTournament(tournamentId).then(t => {
+          if (!t.entry || !t.entry.nextMatch) throw new Error('トーナメントの次の試合がありません');
+          tournament = t;
+          return VolleyballData.getTeam(t.entry.nextMatch.opponent.id);
+        })
+        : VolleyballData.getTeam('cpu');
       Promise.all([
         app.loadScripts(GAME_SCRIPTS),
         VolleyballData.getTeam('player'),
-        VolleyballData.getTeam('cpu')
+        opponent
       ]).then(([, nearTeam, farTeam]) => {
         if (disposed) return; // 読み込み中に画面を離れた
         loading.remove();
@@ -89,6 +108,11 @@
         startGame();
       }).catch(err => {
         if (disposed) return;
+        if (tournamentId) {
+          app.toast(err.message);
+          app.go('tournament', [tournamentId], { replace: true });
+          return;
+        }
         loading.textContent = '読み込みに失敗しました';
         throw err; // エラーバナーにも出す
       });
@@ -102,6 +126,7 @@
           joystickParent: el,
           nearTeam: teams.near,
           farTeam: teams.far,
+          rules: tournament ? tournament.rules : null,
           onRallyEnd: onRallyEnd,
           onScore: onScore
         });
@@ -155,6 +180,29 @@
         resultEl.querySelector('.court-result-sets').textContent =
           state.setResults.map(r => r.near + '-' + r.far).join('  ');
         resultEl.hidden = false;
+        if (tournamentId) recordTournament(win, state);
+      }
+
+      // トーナメントの試合結果を記録し、結果の下に勝ち上がり・成績を出す
+      function recordTournament(win, state) {
+        const note = document.createElement('p');
+        note.className = 'court-result-note';
+        resultEl.querySelector('.court-result-sets').after(note);
+        const roundName = tournament.entry.nextMatch.roundName;
+        VolleyballData.recordTournamentMatch(tournamentId, {
+          win: win,
+          sets: state.setResults.map(r => [r.near, r.far])
+        }).then(t => {
+          if (disposed) return;
+          const e = t.entry;
+          if (e.status === 'finished') {
+            note.textContent = e.placementLabel + (e.rewards.length
+              ? '  ' + e.rewards.map(r => r.item.name + '×' + r.quantity).join('、') + 'を獲得'
+              : '');
+          } else {
+            note.textContent = roundName + '突破!  次は' + e.nextMatch.roundName + '(vs ' + e.nextMatch.opponent.name + ')';
+          }
+        }).catch(err => { note.textContent = err.message; });
       }
 
       return {

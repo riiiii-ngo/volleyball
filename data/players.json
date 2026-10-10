@@ -2,6 +2,12 @@
   "version": 2,
   "players": [
     {"player_id": 1, "player_name": "プレイヤー", "paid_diamonds": 0, "free_diamonds": 1500, "coins": 12000},
-    {"player_id": 2, "player_name": "紅陵高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0}
+    {"player_id": 2, "player_name": "紅陵高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 3, "player_name": "白鷺学園", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 4, "player_name": "東雲工業高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 5, "player_name": "桜ヶ丘高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 6, "player_name": "青葉台高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 7, "player_name": "北辰高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0},
+    {"player_id": 8, "player_name": "鳳凰館高校", "paid_diamonds": 0, "free_diamonds": 0, "coins": 0}
   ]
 }

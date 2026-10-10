@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "tournament_rewards": [
+    {"tournament_id": "t_invitational", "placement": 1, "item_id": "i_exp_ticket_1", "quantity": 20},
+    {"tournament_id": "t_invitational", "placement": 2, "item_id": "i_exp_ticket_1", "quantity": 10},
+    {"tournament_id": "t_invitational", "placement": 4, "item_id": "i_exp_ticket_1", "quantity": 5},
+    {"tournament_id": "t_invitational", "placement": 8, "item_id": "i_exp_ticket_1", "quantity": 2}
+  ]
+}

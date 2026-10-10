@@ -209,6 +209,7 @@
       ballRadius: VolleyballBall.RADIUS,
       teams: simTeams,
       controlSide: 'near',
+      rules: options.rules || null, // 試合のルール(セット数・点数)。省略時は2セット先取・25点・最終セット15点
       onEvent: options.onEvent || null
     });
 

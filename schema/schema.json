@@ -14,7 +14,10 @@
     "party_decks": { "type": "array", "items": { "$ref": "#/$defs/party_decks" } },
     "party_deck_members": { "type": "array", "items": { "$ref": "#/$defs/party_deck_members" } },
     "gachas": { "type": "array", "items": { "$ref": "#/$defs/gachas" } },
-    "gacha_details": { "type": "array", "items": { "$ref": "#/$defs/gacha_details" } }
+    "gacha_details": { "type": "array", "items": { "$ref": "#/$defs/gacha_details" } },
+    "tournaments": { "type": "array", "items": { "$ref": "#/$defs/tournaments" } },
+    "tournament_entries": { "type": "array", "items": { "$ref": "#/$defs/tournament_entries" } },
+    "tournament_rewards": { "type": "array", "items": { "$ref": "#/$defs/tournament_rewards" } }
   },
   "additionalProperties": false,
 
@@ -350,6 +353,62 @@
         }
       },
       "required": ["gacha_detail_id", "gacha_id", "character_id", "probability"],
+      "additionalProperties": false
+    },
+
+    "tournaments": {
+      "title": "トーナメントマスタ",
+      "description": "勝ち抜き戦(シングルエリミネーション)。team_count は自分を含む出場チーム数(2の累乗)。試合のルールも持つ。",
+      "x-table": "tournaments",
+      "x-primaryKey": ["tournament_id"],
+      "type": "object",
+      "properties": {
+        "tournament_id": { "$ref": "#/$defs/masterId", "description": "トーナメントID" },
+        "tournament_name": { "type": "string", "minLength": 1, "maxLength": 64, "x-dbType": "VARCHAR(64)", "description": "大会名" },
+        "team_count": { "type": "integer", "enum": [2, 4, 8, 16, 32], "x-dbType": "SMALLINT", "description": "出場チーム数(自分を含む。2の累乗)" },
+        "sets_to_win": { "type": "integer", "minimum": 1, "maximum": 3, "x-dbType": "SMALLINT", "description": "勝つのに必要なセット数" },
+        "set_points": { "type": "integer", "minimum": 5, "maximum": 25, "x-dbType": "SMALLINT", "description": "1セットの点数(2点差がつくまで続く)" },
+        "final_set_points": { "type": "integer", "minimum": 5, "maximum": 25, "x-dbType": "SMALLINT", "description": "最終セットの点数" }
+      },
+      "required": ["tournament_id", "tournament_name", "team_count", "sets_to_win", "set_points", "final_set_points"],
+      "additionalProperties": false
+    },
+
+    "tournament_entries": {
+      "title": "トーナメント出場チーム",
+      "description": "自分以外の出場チーム(CPUプレイヤー)。1大会で team_count - 1 行(アプリ側で検証)。各プレイヤーの1番デッキで出場する。",
+      "x-table": "tournament_entries",
+      "x-primaryKey": ["tournament_id", "player_id"],
+      "x-foreignKeys": [
+        { "columns": ["tournament_id"], "references": "tournaments(tournament_id)", "onDelete": "CASCADE" },
+        { "columns": ["player_id"], "references": "players(player_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "tournament_id": { "$ref": "#/$defs/masterId", "description": "トーナメントID [PK, FK tournaments]" },
+        "player_id": { "$ref": "#/$defs/serialId", "description": "出場するCPUプレイヤーID [PK, FK players]" }
+      },
+      "required": ["tournament_id", "player_id"],
+      "additionalProperties": false
+    },
+
+    "tournament_rewards": {
+      "title": "トーナメント報酬",
+      "description": "成績ごとの報酬。placement は 1=優勝, 2=準優勝, 4=ベスト4, 8=ベスト8 …(負けた試合までに残っていたチーム数)。",
+      "x-table": "tournament_rewards",
+      "x-primaryKey": ["tournament_id", "placement", "item_id"],
+      "x-foreignKeys": [
+        { "columns": ["tournament_id"], "references": "tournaments(tournament_id)", "onDelete": "CASCADE" },
+        { "columns": ["item_id"], "references": "items(item_id)" }
+      ],
+      "type": "object",
+      "properties": {
+        "tournament_id": { "$ref": "#/$defs/masterId", "description": "トーナメントID [PK, FK tournaments]" },
+        "placement": { "type": "integer", "enum": [1, 2, 4, 8, 16, 32], "x-dbType": "SMALLINT", "description": "成績 [PK]" },
+        "item_id": { "$ref": "#/$defs/masterId", "description": "もらえるアイテムID [PK, FK items]" },
+        "quantity": { "type": "integer", "minimum": 1, "x-dbType": "INTEGER", "description": "個数" }
+      },
+      "required": ["tournament_id", "placement", "item_id", "quantity"],
       "additionalProperties": false
     }
   }

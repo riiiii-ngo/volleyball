@@ -16,10 +16,11 @@ css/training.css     選手育成画面
 css/gacha.css        ガチャ画面
 css/shop.css         ショップ(アイテム)画面と、選手育成の経験値チケット
 css/lineup.css       スタメン設定画面
+css/tournament.css   トーナメント画面
 css/header.css       画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)
 data/*.json          マスタ・初期データ。1ファイル=1テーブル(schema/schema.json の形)。characters / players / player_characters / party_decks / party_deck_members / items / shop_items / player_items / gachas / gacha_details
 backup/data_v1/      旧形式のデータ(characters.json / teams.json)。ゲームからは読まない
-schema/schema.json   将来のDB用データ構造(JSON Schema)。全10テーブル
+schema/schema.json   将来のDB用データ構造(JSON Schema)。全13テーブル
 schema/types.ts      同じ構造のTypeScript型定義
 schema/create_tables.sql 同じ構造のCREATE TABLE文(PostgreSQL)
 js/data/progression.js VolleyballProgression - 成長ルール(経験値・レベル・育成ポイント)
@@ -36,6 +37,7 @@ js/screens/training.js 選手育成画面
 js/screens/gacha.js  ガチャ画面(一覧・引く・結果・選手の詳細)
 js/screens/shop.js   ショップ(アイテム)画面
 js/screens/lineup.js スタメン設定画面
+js/screens/tournament.js トーナメント画面
 js/screens/header.js VolleyballHeader - 画面上部の共通ヘッダー(ユーザ名・ダイヤ・コイン)
 js/screens/ui.js     VolleyballUI     - 画面間で共通の表示部品(エスケープ・レベル表示・ポイント表示)
 js/court.js          VolleyballCourt   - コートの3Dモデル(床・ライン・ネット・ポール・アンテナ)
@@ -68,6 +70,8 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 | `#/gacha`, `#/gacha/<ガチャID>` | ガチャ(ショップ > ガチャ)。開催中の一覧 / 引く画面(結果も同じ画面で表示) | `js/screens/gacha.js` |
 | `#/shop` | ショップのアイテム(ショップ > アイテム)。商品の一覧と購入 | `js/screens/shop.js` |
 | `#/lineup` | スタメン設定(チーム > スタメン設定)。デッキの7枠に選手を置く | `js/screens/lineup.js` |
+| `#/tournament`, `#/tournament/<トーナメントID>` | トーナメント(試合 > トーナメント)。出場・組み合わせ・成績 | `js/screens/tournament.js` |
+| `#/practice/tournament/<トーナメントID>` | トーナメントの次の試合(コート画面) | `js/screens/practice.js` |
 
 ```
 タイトル --(タップ / PCは任意のキー)--> メニュー
@@ -98,7 +102,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 
 | タブ | 項目 |
 |---|---|
-| 試合 | フリー練習(→`#/practice`)、リーグ戦、トーナメント、親善試合、オンライン対戦 |
+| 試合 | フリー練習(→`#/practice`)、リーグ戦、トーナメント(→`#/tournament`)、親善試合、オンライン対戦 |
 | チーム | スタメン設定(→`#/lineup`)、選手一覧、選手育成 |
 | ショップ | ガチャ(→`#/gacha`)、アイテム(→`#/shop`)、ユニフォーム |
 | 社交 | フレンド、ランキング、クラブ |
@@ -118,7 +122,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 
 ### データ
 - `data/`の各ファイルは`schema/schema.json`のテーブル1つ分で、形は`{ "version": 2, "<テーブル名>": [レコード, ...] }`(1行1レコード)。列の意味は下の「DB用のデータ構造」を参照。
-- 中身(仮のデータ):選手115人(既存の12人＋新規103人。★5:4/★4:9/★3:22/★2:30/★1:50)、プレイヤー2人(1=自分、2=練習相手の紅陵高校をCPUプレイヤーとして登録)、所持選手19体(同じ選手の重複所持の例あり)、デッキ3つ(自分の1番・2番(空き枠あり)、紅陵高校の1番)、アイテム5種・ショップ商品6つ・所持アイテム2件、ガチャ5つ(常設/期間限定ピックアップ/チケット/★4以上確定/お試し)と排出率266行(各ガチャの合計は100%)。常設などの4つは最初の50人から排出する。
+- 中身(仮のデータ):選手115人(既存の12人＋新規103人。★5:4/★4:9/★3:22/★2:30/★1:50)、プレイヤー8人(1=自分、2=練習相手の紅陵高校、3〜8=トーナメントのCPU校。CPUはそれぞれ1番デッキに7人)、所持選手61体(自分12体・紅陵高校7体・CPU校6校×7体。同じ選手の重複所持の例あり。CPU校の行のIDは1001〜)、デッキ9つ(自分の1番・2番(空き枠あり)、CPU7校の1番)、アイテム5種・ショップ商品6つ・所持アイテム2件、ガチャ5つ(常設/期間限定ピックアップ/チケット/★4以上確定/お試し)と排出率266行(各ガチャの合計は100%)。常設などの4つは最初の50人から排出する。
 - お試しガチャ(`g_trial`):無料(`currency_type`=`free`、値段0)、期間は2026-10-05 0:00〜9999-12-31 23:59:59(日本時間)。排出は★5が2人で合計0.1%(1人0.05%)、★4が5人で9%(1人1.8%)、★3が10人で20%(1人2%)、★2が30人で30%(1人1%)、★1が50人で40.9%(1人0.818%)。★1は合計を100%にするため40%から40.9%にした。
 - 既存の12人のLv1の値(`min_*`)は旧データのステータスのままなので、試合のバランスは変わらない。旧データに無かった`spike`はパワー・テクニック・ジャンプの平均、`stamina`は55〜70の乱数で決めた。新規の選手はポジションごとの基準値＋レア度＋乱数で作った(名前はすべて架空)。
 - ゲームへの渡し方(`js/data/json-source.js`):
@@ -135,7 +139,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - データは「マスタ」(キャラクターの初期値・チーム編成・初期の所持選手/所持アイテム。ゲームからは書き換えない)と「セーブ」(所持選手1体ごとのレベル・経験値・育成ポイント・割り振ったステータス、ガチャで獲得した所持選手、アイテムの所持数)の2種類。画面に渡す選手は、所持選手の行のステータスにセーブの割り振り分を足したもの(試合用の`stats`、全10項目の`allStats`。今はどちらも10項目)で、`playerCharacterId`・`baseStats`(基本値)・`bonus`(割り振り分)・`level`・`exp`・`expToNext`・`points`・`team`(自チームでの立ち位置と背番号。控えは`null`)も持つ。同じ選手を2体持っていても、レベル・育成は別々。
 - ゲームの各画面は`VolleyballData`だけを通して読み書きする(すべてPromise)。読み取り:`getTeam(id)`/`getPlayer()`(ユーザ名・ダイヤ・コイン)/`getOwnedCharacters()`/`getOwnedCharacter(所持選手ID)`/`reload()`など。書き込み:`allocatePoints(所持選手ID, { stat: 上げ幅 })`(ポイント不足・99超え・マイナスはエラー)/`useExpTicket(所持選手ID, アイテムID)`/`sellCharacters(所持選手IDの配列)`など。保存先の違いは「ソース」が吸収する。
 - 使うソースは`index.html`の`VolleyballData.configure({ source: 'json', baseUrl: 'data/' })`で決まる。
-- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], sold: [売却した所持選手ID], decks: { [デッキID]: { [枠]: { playerCharacterId, number } } }, items: { [アイテムID]: 所持数 } }`)の7つ。`loadOwnedCharacters()`は自分のデッキの初期の編成(`decks`)も、`loadTeams()`は自チームが使うデッキID(`deckId`)と試合の立ち位置→デッキの枠の対応(`deckSlots`)も返す。
+- DBに移す時：ブラウザからDBへは直接つながないため、DBを読むサーバーAPIを用意し、それを呼ぶソース(例 `js/data/api-source.js`)を作って`VolleyballData.registerSource('api', ...)`で登録、`configure`の`source`を`'api'`に変えるだけ。ソースが実装するのは`loadCharacters()`/`loadTeams()`(マスタ。返す形は`js/data/repository.js`先頭のコメント。テーブルの形からの変換はソースで行う)、`loadGachas()`(ガチャと排出率)、`loadOwnedCharacters()`(初期の所持選手)、`loadItems()`(アイテム・ショップ商品・初期の所持アイテム)、`loadTournaments()`(トーナメント。無いソースは省略可)と`loadProgress()`/`saveProgress(progress)`(セーブ。形は`{ owned: { [所持選手ID]: { level, exp, points, bonus: { [stat]: n } } }, ownedCharacters: [player_charactersの行], sold: [売却した所持選手ID], decks: { [デッキID]: { [枠]: { playerCharacterId, number } } }, items: { [アイテムID]: 所持数 }, tournaments: { [トーナメントID]: 出場状況 } }`)。`loadTeams()`は自チームとCPUの全チーム(`'cpu'`=紅陵高校、`'cpu-<プレイヤーID>'`=各CPUプレイヤーの1番デッキ)を返す。`loadOwnedCharacters()`は自分のデッキの初期の編成(`decks`)も、`loadTeams()`は自チームが使うデッキID(`deckId`)と試合の立ち位置→デッキの枠の対応(`deckSlots`)も返す。
 - 以前のセーブ(キャラID単位の`characters`)は、読み込み時に自チームでその選手を使っている所持選手の分として引き継ぐ(自チームにいない選手の分は捨てる)。
 - ガチャで獲得した所持選手のIDは、全プレイヤーの`player_characters`の最大ID+1から採番する(`loadOwnedCharacters()`の`maxPlayerCharacterId`。以前は自分の行だけで数えていたため、相手プレイヤーの行とIDが重なっていた)。
 - `json`ソースでは、静的ファイルには書き込めないためセーブをブラウザの`localStorage`(キー`volleyball.progress.v1`)に保存する。そのブラウザ・端末の中だけに残り、別の端末とは共有されない。DBソースに切り替えればサーバー側に保存される。
@@ -157,8 +161,9 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
   - 超えた分の経験値はそのまま次のレベルへ持ち越す(目標レベルより上がることもある)。
 
 ### DB用のデータ構造(`schema/`)
-- プレイヤー・選手・アイテム・ショップ・所持アイテム・所持選手・スタメン・ガチャの10テーブルを、`schema.json`(JSON Schema)・`types.ts`(TypeScript)・`create_tables.sql`(PostgreSQL)の3形式で同じ内容に定義。列名はsnake_caseで統一し、JSONとDBで名前を変換せずに使える。
-- テーブル:`players`, `characters`, `items`, `shop_items`, `player_items`, `player_characters`, `party_decks`, `party_deck_members`, `gachas`, `gacha_details`。
+- プレイヤー・選手・アイテム・ショップ・所持アイテム・所持選手・スタメン・ガチャ・トーナメントの13テーブルを、`schema.json`(JSON Schema)・`types.ts`(TypeScript)・`create_tables.sql`(PostgreSQL)の3形式で同じ内容に定義。列名はsnake_caseで統一し、JSONとDBで名前を変換せずに使える。
+- テーブル:`players`, `characters`, `items`, `shop_items`, `player_items`, `player_characters`, `party_decks`, `party_deck_members`, `gachas`, `gacha_details`, `tournaments`, `tournament_entries`, `tournament_rewards`。
+- トーナメント:`tournaments`(大会名・チーム数(2の累乗)・試合のルール`sets_to_win`/`set_points`/`final_set_points`)、`tournament_entries`(自分以外の出場チーム=CPUプレイヤー。1番デッキで出場。`team_count - 1`行になることはアプリ側で検証)、`tournament_rewards`(成績`placement`=1優勝/2準優勝/4ベスト4/8ベスト8…ごとのアイテムと個数)。
 - ポジションは`WS`/`MB`/`OP`/`SE`/`LI`。ステータスは`spike`/`receive`/`block`/`toss`/`serve`/`power`/`speed`/`stamina`/`jump`/`technique`の10項目(`characters`はLv1(獲得時)の値`min_*`だけで上限値は持たない、`player_characters`は現在値)。`characters.height`は身長(cm)。
 - `player_characters.exp`は今のセーブと同じく「現在のレベル内の経験値」(レベルアップで次のレベル分を引く。最大Lvでは0)。
 - `items.effect_value`:アイテムを使った時の効果量(`exp_ticket`は獲得経験値)。効果の無い種別は`null`で、`exp_ticket`の時は必須(DBのCHECKでも保証)。
@@ -373,6 +378,14 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - `phase`:`between`(次のサーブへ歩いている) → `preServe`(サーブを打てる) → `serving`(トス中) → `rally` → `dead`(落ちてから得点まで) → … / `setBreak` / `matchOver`。
 - 打球の種類(`flight.kind`):`serveToss` / `serve` / `pass` / `set` / `attack` / `tip` / `free` / `blockStuff` / `blockTouch` / `blockOut` / `netFall`。
 
+## トーナメント(`#/tournament`、`js/screens/tournament.js`)
+- メニューの「試合 > トーナメント」から開く。今は「招待トーナメント」1つ(`t_invitational`):自分を含む8チームの勝ち抜き戦(準々決勝・準決勝・決勝)、2セット先取・15点(最終セットも15点、2点差がつくまで)。出場校は紅陵高校と新しいCPU校6校(強い順に鳳凰館高校(★4〜5中心)・北辰高校・青葉台高校・桜ヶ丘高校・東雲工業高校・白鷺学園(★1〜2中心))。
+- 出場前:大会の説明・出場校・成績ごとの報酬と「出場する」。出場すると組み合わせを抽選し、自分の試合以外の1回戦はその場で結果が決まる。
+- 出場中:次の試合(ラウンド名と相手)と「試合へ」「棄権」、ラウンドごとの組み合わせと結果(セット数・各セットの得点、勝ったチームを強調、自チームはオレンジ)。「試合へ」でコート画面(`#/practice/tournament/<ID>`)に入り、大会の相手・ルールで試合をする。試合が終わると結果を記録し(`VolleyballData.recordTournamentMatch`)、結果の下に「準々決勝突破! 次は準決勝(vs ○○)」や成績・報酬を出す(ボタンは「トーナメントへ」だけ)。試合の途中で「‹ トーナメント」で戻った場合は記録しないので、同じ試合をやり直せる。「棄権」(確認あり)はその試合を負けとして大会を終える。
+- 負けた時点(または優勝)で大会が終わり、成績(優勝/準優勝/ベスト4/ベスト8)に応じた報酬を受け取る:経験値チケットLv1を優勝20・準優勝10・ベスト4 5・ベスト8 2枚(`data/tournament_rewards.json`)。終わった後も残りの試合を最後まで決め、優勝校を表示する。「もう一度出場する」で何度でも出られる(組み合わせは毎回抽選)。
+- CPUどうしの試合は実際には動かさず、結果だけ決める:チームの強さ=出場7人の試合用ステータス8項目の平均、1セットを取る確率=1/(1+e^(-強さの差/6))(`CPU_MATCH_SPREAD`)、セットの得点は負けた側が点数-9〜-2(15%でデュース)。強さは自チームの初期編成が約72、CPU校は62〜80。自チームが1回戦で負けた時の優勝校(400回):鳳凰館75%・北辰17%・その他8%。
+- 出場状況はセーブの`tournaments`(大会ごと。組み合わせ`bracket`、ラウンドごとの試合`rounds`、`status`、成績`placement`、受け取った報酬`rewards`)に保存。データ窓口は`getTournaments`/`getTournament`/`enterTournament`/`recordTournamentMatch`/`withdrawTournament`。
+
 ## 既知の不具合(未解決)
 
 - データは新しい形(`data/*.json`)になったが、ゲームはまだ一部しか使っていない。`json-source.js`が試合用の形に変換して渡している。
@@ -391,7 +404,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 - ブロックの読み(CPUのMBがトスを見てから動く・コミットする)の強さ、守備陣形(ローテーションディフェンス等)の選択。
 - 疲れ・得点時の喜び・失点時の悔しがりなどの演出モーション。選手ごとの髪型・肌の色。
 - ポジションの重なりの反則(サーブの瞬間のローテーション順)、タッチネット・オーバーネット、ネットに当たったボールを続けて拾う。
-- 試合の報酬(コイン・経験値チケット)と、リーグ戦・トーナメントなどの試合モード。
+- 試合の報酬(コイン)と、リーグ戦(SVリーグのようなシーズン制を想定)・親善試合などの試合モード。トーナメントの段階(地区→県→全国など)。
 - オンライン対戦。`simulation`を権威のある状態(サーバー/ホスト)側に置き、`getState()`のスナップショット送信・相手の操作コマンド受信で同期する想定。
 
 ## 進捗ログ
@@ -399,6 +412,7 @@ js/game.js           VolleyballGame     - シーン構築・入力配線・毎�
 実装・修正を行うたびに、新しい日付のものを上に追記していく。
 
 ### 2026-10-10
+- トーナメントを追加(`#/tournament`、`js/screens/tournament.js`、`css/tournament.css`)。8チームの勝ち抜き戦(2セット先取・15点)で、負けた時点の成績に応じて経験値チケットLv1(優勝20・準優勝10・ベスト4 5・ベスト8 2枚)をもらえる。試合はコート画面を大会の相手・ルールで使う(`#/practice/tournament/<ID>`、`VolleyballGame.init`に`rules`を追加)。CPUどうしの試合は強さの差から結果だけ決める。CPU校6校(プレイヤー3〜8、選手は未使用の選手から強い学校ほどレア度の高い選手を選んだ)と、`tournaments`/`tournament_entries`/`tournament_rewards`の3テーブル(`data/`と`schema/`の3ファイル)を追加。ソースに`loadTournaments()`、`loadTeams()`にCPUの全チーム(`'cpu-<プレイヤーID>'`)を追加。ヘッドレスChromeで、メニュー→トーナメント→出場→組み合わせ表示→「試合へ」でコート画面に次の相手(鳳凰館高校)とルール(2セット先取・15点)が渡る→「‹ トーナメント」で記録せず戻る、データ窓口で3連勝すると優勝・チケット+20、1回戦負けでベスト8・+2、準決勝で棄権するとベスト4、出場中に重ねて出場できない、フリー練習は今まで通り紅陵高校・25点ルールのままであることを確認。実際の試合を最後まで動かして結果を記録する流れは、時間がかかるため自動テストでは確認していない(記録処理はデータ窓口で確認)。
 - 選手の頭の上に名前(姓)と体力バーを出し、トス方向を選んでいる間はトスを打つ選手の頭の上に▼を出すようにした(上の「選手の頭の上の表示」)。シミュレーションの`getState().setChoice`に`targetId`を追加。確認:ヘッドレスChrome(390×844)で12人の名前と体力バーが出て、トスを選ぶ間はクイックに入る大鷹の上に▼が出ることを確認。Nodeで、自チームのトス方向をレフト/ライト/センターと順に変えて約200回トスを上げ、▼の選手と実際にトスを打ちに行った選手が同じであることを確認(違ったのは、二段トスが乱れてネットを越え、打てなかった2回だけ)。
 - 選手の見た目を作り直した(`js/players.js`、`js/game.js`、`js/simulation.js`)。関節で動く人型にし、背中と胸に背番号、身長に合わせた大きさ、短パン・靴・髪を付けた。走る・構える・レシーブ・飛びつき・トス・二段トス・スパイク・フェイント・ブロック・サーブ(フローター/ジャンプ)の体の動きを入れた(上の「選手の見た目とモーション」)。シミュレーションは各選手の動作と触る時刻(`action`)とサーバーかどうか(`server`)を`getState()`で渡すだけで、試合の進み方は変えていない。確認:各動作をキーの時刻ごとに並べて描いて形を見た。ヘッドレスChrome(390×844)でフリー練習を1ラリー以上進め、エラーが無く背番号が見えること・相手のブロックが腕を上げて跳ぶことを確認。CPU同士の早送り10試合(約1,000ラリー)でエラーなく、全種類の動作が出ることを確認。
 - ジョイスティックを、画面のどこを触ってもその場所を中心に操作できるようにした(ボタン以外の画面全体で受け付け、指を離しても台座は最後に触った場所に残る)。画面全体を覆う透明なタッチ受付(`.vb-joystick-area`、ボタンより下・3D描画より上)を追加し、台座は表示だけにした。端では台座を画面内に寄せ、見出しも台座に付いていく。あわせてサーブボタンを指が触れた時点で反応するようにした(ジョイスティックを押さえたまま別の指で押すと click が出ないことがあったため)。iPhone 13相当のタッチ操作で、(150,300)を触ると台座がそこへ動いてドラッグでノブが動き、離すとノブだけ中央に戻る、端(3,660)を触ると(74,590)に寄る、ジョイスティックを押さえたまま別の指でサーブできる、指だけ・マウスでもサーブできる、画面を横にすると台座が画面内に寄ることを確認。

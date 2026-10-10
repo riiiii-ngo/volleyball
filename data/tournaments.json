@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "tournaments": [
+    {"tournament_id": "t_invitational", "tournament_name": "招待トーナメント", "team_count": 8, "sets_to_win": 2, "set_points": 15, "final_set_points": 15}
+  ]
+}

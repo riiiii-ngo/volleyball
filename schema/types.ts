@@ -134,6 +134,30 @@ export interface GachaDetail {
   probability: number;
 }
 
+/** 10. トーナメントマスタ(勝ち抜き戦。team_count は自分を含む出場チーム数) */
+export interface Tournament {
+  tournament_id: MasterId; // PK
+  tournament_name: string;
+  team_count: 2 | 4 | 8 | 16 | 32;
+  sets_to_win: number;
+  set_points: number;
+  final_set_points: number;
+}
+
+/** 11. トーナメント出場チーム(自分以外のCPUプレイヤー。1番デッキで出場) */
+export interface TournamentEntry {
+  tournament_id: MasterId; // PK, FK -> tournaments
+  player_id: SerialId; // PK, FK -> players
+}
+
+/** 12. トーナメント報酬(placement: 1=優勝, 2=準優勝, 4=ベスト4, 8=ベスト8 …) */
+export interface TournamentReward {
+  tournament_id: MasterId; // PK, FK -> tournaments
+  placement: 1 | 2 | 4 | 8 | 16 | 32; // PK
+  item_id: MasterId; // PK, FK -> items
+  quantity: number;
+}
+
 /** テーブル名 → 行の型 */
 export interface Tables {
   players: Player;
@@ -146,6 +170,9 @@ export interface Tables {
   party_deck_members: PartyDeckMember;
   gachas: Gacha;
   gacha_details: GachaDetail;
+  tournaments: Tournament;
+  tournament_entries: TournamentEntry;
+  tournament_rewards: TournamentReward;
 }
 
 export type TableName = keyof Tables;

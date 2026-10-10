@@ -23,7 +23,7 @@
       items: [
         { id: 'practice', label: 'フリー練習', en: 'PRACTICE', screen: 'practice', featured: true },
         { id: 'league', label: 'リーグ戦', en: 'LEAGUE' },
-        { id: 'tournament', label: 'トーナメント', en: 'TOURNAMENT' },
+        { id: 'tournament', label: 'トーナメント', en: 'TOURNAMENT', screen: 'tournament', featured: true },
         { id: 'friendly', label: '親善試合', en: 'FRIENDLY' },
         { id: 'online', label: 'オンライン対戦', en: 'ONLINE' }
       ]

@@ -146,3 +146,29 @@ CREATE TABLE gacha_details (
     probability      DECIMAL(7,4) NOT NULL CHECK (probability > 0 AND probability <= 100),
     UNIQUE (gacha_id, character_id)
 );
+
+-- 10. トーナメントマスタ(勝ち抜き戦。team_count は自分を含む出場チーム数。試合のルールも持つ)
+CREATE TABLE tournaments (
+    tournament_id     VARCHAR(32) PRIMARY KEY,
+    tournament_name   VARCHAR(64) NOT NULL,
+    team_count        SMALLINT    NOT NULL CHECK (team_count IN (2, 4, 8, 16, 32)),
+    sets_to_win       SMALLINT    NOT NULL CHECK (sets_to_win BETWEEN 1 AND 3),
+    set_points        SMALLINT    NOT NULL CHECK (set_points BETWEEN 5 AND 25),
+    final_set_points  SMALLINT    NOT NULL CHECK (final_set_points BETWEEN 5 AND 25)
+);
+
+-- 11. トーナメント出場チーム(自分以外のCPUプレイヤー。1大会で team_count - 1 行になることはアプリ側で検証する)
+CREATE TABLE tournament_entries (
+    tournament_id  VARCHAR(32) NOT NULL REFERENCES tournaments (tournament_id) ON DELETE CASCADE,
+    player_id      BIGINT      NOT NULL REFERENCES players (player_id),
+    PRIMARY KEY (tournament_id, player_id)
+);
+
+-- 12. トーナメント報酬(placement: 1=優勝, 2=準優勝, 4=ベスト4, 8=ベスト8 …)
+CREATE TABLE tournament_rewards (
+    tournament_id  VARCHAR(32) NOT NULL REFERENCES tournaments (tournament_id) ON DELETE CASCADE,
+    placement      SMALLINT    NOT NULL CHECK (placement IN (1, 2, 4, 8, 16, 32)),
+    item_id        VARCHAR(32) NOT NULL REFERENCES items (item_id),
+    quantity       INTEGER     NOT NULL CHECK (quantity >= 1),
+    PRIMARY KEY (tournament_id, placement, item_id)
+);

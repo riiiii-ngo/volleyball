@@ -3,6 +3,12 @@
   "party_decks": [
     {"deck_id": 1, "player_id": 1, "deck_number": 1},
     {"deck_id": 2, "player_id": 1, "deck_number": 2},
-    {"deck_id": 3, "player_id": 2, "deck_number": 1}
+    {"deck_id": 3, "player_id": 2, "deck_number": 1},
+    {"deck_id": 4, "player_id": 3, "deck_number": 1},
+    {"deck_id": 5, "player_id": 4, "deck_number": 1},
+    {"deck_id": 6, "player_id": 5, "deck_number": 1},
+    {"deck_id": 7, "player_id": 6, "deck_number": 1},
+    {"deck_id": 8, "player_id": 7, "deck_number": 1},
+    {"deck_id": 9, "player_id": 8, "deck_number": 1}
   ]
 }

@@ -9,6 +9,7 @@
  *   - プレイヤー: players のうち PLAYER_ID の行(名前・ダイヤ・コイン)。
  *   - 所持選手: player_characters のうち PLAYER_ID の行(初期の所持選手)。
  *   - アイテム: items / shop_items と、player_items のうち PLAYER_ID の行(初期の所持アイテム)。
+ *   - トーナメント: tournaments / tournament_entries / tournament_rewards。
  * セーブデータ(レベル・育成・ガチャで獲得した所持選手など)は静的ファイルに書き込めないので、ブラウザの localStorage に保存する
  * (そのブラウザ・端末の中だけに残る。DB に移したらサーバー側に保存される想定)。
  *
@@ -54,10 +55,14 @@
       return loadJson(name + '.json').then(json => json[name] || []);
     }
 
-    // GAME_TEAMS のデッキを読み、チームごとに [{ slot, characterId, playerCharacterId, number }] を作る。
+    // 試合で使えるチーム:GAME_TEAMS と、自分以外の全プレイヤー(CPU)の1番デッキ('cpu-<プレイヤーID>')。
+    // チームごとに [{ slot, characterId, playerCharacterId, number }] を作る。
     function loadGameTeams() {
       return Promise.all(['players', 'player_characters', 'party_decks', 'party_deck_members'].map(loadTable))
-        .then(([players, owned, decks, members]) => GAME_TEAMS.map(t => {
+        .then(([players, owned, decks, members]) => GAME_TEAMS.concat(players
+          .filter(p => p.player_id !== PLAYER_ID && decks.some(d => d.player_id === p.player_id && d.deck_number === 1))
+          .map(p => ({ id: 'cpu-' + p.player_id, name: null, playerId: p.player_id, deckNumber: 1, slots: ALL_SLOTS }))
+        ).map(t => {
           const deck = decks.find(d => d.player_id === t.playerId && d.deck_number === t.deckNumber);
           const row = deck && members.find(m => m.deck_id === deck.deck_id);
           if (!row) throw new Error('チーム "' + t.id + '" のデッキ(プレイヤー' + t.playerId + ' の ' + t.deckNumber + '番)がありません');
@@ -128,6 +133,19 @@
               .map(r => ({ characterId: r.character_id, probability: r.probability }))
           };
         }));
+      },
+
+      loadTournaments() {
+        return Promise.all(['tournaments', 'tournament_entries', 'tournament_rewards'].map(loadTable))
+          .then(([tournaments, entries, rewards]) => tournaments.map(t => ({
+            id: t.tournament_id,
+            name: t.tournament_name,
+            teamCount: t.team_count,
+            rules: { setsToWin: t.sets_to_win, setPoints: t.set_points, finalSetPoints: t.final_set_points },
+            teams: entries.filter(e => e.tournament_id === t.tournament_id).map(e => 'cpu-' + e.player_id),
+            rewards: rewards.filter(r => r.tournament_id === t.tournament_id)
+              .map(r => ({ placement: r.placement, itemId: r.item_id, quantity: r.quantity }))
+          })));
       },
 
       loadItems() {

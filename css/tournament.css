@@ -1,0 +1,76 @@
+/* トーナメント画面(共通部分は roster.css / training.css) */
+.tour-panel { max-width: var(--content-max, 560px); margin: 0 auto; }
+.tour-panel > .training-btn { width: 100%; margin-bottom: 18px; }
+
+.tour-next {
+  margin: 0 0 18px;
+  padding: 12px 14px 14px;
+  background: var(--navy-850);
+  border-left: 4px solid var(--orange);
+}
+.tour-next-label { margin: 0; font-size: 12px; font-weight: 900; color: var(--navy-300); }
+.tour-next-label b { margin-left: 10px; font-size: 16px; color: var(--orange); }
+.tour-next-opponent { margin: 2px 0 12px; font-size: 22px; font-weight: 900; }
+
+.tour-result {
+  margin: 0 0 12px;
+  padding: 14px;
+  text-align: center;
+  background: var(--navy-850);
+  border-top: 3px solid var(--navy-300);
+}
+.tour-result.is-champion { border-top-color: var(--yellow); }
+.tour-result-title { margin: 0 0 4px; font-size: 28px; font-weight: 900; }
+.tour-result.is-champion .tour-result-title { color: var(--yellow); }
+.tour-result-reward { margin: 0; font-size: 13px; font-weight: 700; color: var(--cream); }
+.tour-result-champion { margin: 4px 0 0; font-size: 12px; font-weight: 700; color: var(--navy-300); }
+
+.tour-round-name { margin: 10px 0 6px; font-size: 12px; font-weight: 900; color: var(--orange); }
+.tour-matches, .tour-teams, .tour-rewards {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.tour-match {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 10px;
+  padding: 6px 10px;
+  background: var(--navy-850);
+  border-left: 3px solid var(--navy-700);
+}
+.tour-match.has-player { border-left-color: var(--orange); }
+.tour-team { grid-column: 1; display: flex; align-items: baseline; gap: 8px; font-size: 14px; font-weight: 700; color: #c9d1ea; }
+.tour-team-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tour-team-sets { flex: none; width: 1em; text-align: right; font-family: var(--font-en); font-size: 17px; }
+.tour-team.is-player { color: var(--orange); }
+.tour-team.is-winner { font-weight: 900; color: #fff; }
+.tour-team.is-player.is-winner { color: var(--orange); }
+.tour-team.is-loser { opacity: 0.45; }
+.tour-match-sets {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-family: var(--font-en);
+  font-size: 13px;
+  color: var(--navy-300);
+}
+.tour-teams { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tour-teams li, .tour-rewards li {
+  padding: 6px 10px;
+  background: var(--navy-850);
+  font-size: 13px;
+  font-weight: 700;
+}
+.tour-teams li:first-child { color: var(--orange); }
+.tour-rewards li { display: flex; justify-content: space-between; gap: 10px; }
+.tour-rewards li b { color: var(--cream); }
+
+@media (orientation: landscape) {
+  .tour-matches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 試合結果の下に出すトーナメントの勝ち上がり・成績 */
+.court-result-note { margin: -8px 0 16px; font-size: 14px; font-weight: 900; color: var(--yellow); }

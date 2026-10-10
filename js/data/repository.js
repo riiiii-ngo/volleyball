@@ -37,9 +37,14 @@
  *                               ownedCharacters?: Array<player_characters の行>,
  *                               sold?: Array<player_character_id>,
  *                               decks?: { [deckId]: { [枠]: { playerCharacterId, number } | null } },   編成し直したデッキ
- *                               items?: { [itemId]: 所持数 } } | null   items は所持数が変わったアイテムだけ、
+ *                               items?: { [itemId]: 所持数 },
+ *                               tournaments?: { [トーナメントID]: 出場中・最後に出た大会の状況 } } | null
+ *                               items は所持数が変わったアイテムだけ、
  *                               sold は売却した所持選手(初期の所持選手も含む)のID
  *                               (以前のセーブの characters: { [キャラID]: ... } は、自チームのその選手の分として読み替える)
+ *   loadTournaments()       → Array<{ id, name, teamCount, rules: { setsToWin, setPoints, finalSetPoints },
+ *                                     teams: Array<チームID>, rewards: Array<{ placement, itemId, quantity }> }>
+ *                               トーナメント(teams は自分以外の出場チーム。loadTeams のチームID)。無いソースは省略可
  *   saveProgress(progress)  → 保存完了で resolve
  *   保存先の形(data/*.json や DB のテーブル)からこの形への変換はソースが行う(例: js/data/json-source.js)。
  *   欠けた値や範囲外の値はここで補正するので、ソース側は保存されている値をそのまま返せばよい。
@@ -384,6 +389,13 @@
     Object.keys(items).forEach(id => {
       if (ctx.itemMaster.has(id)) out.items[id] = Math.max(0, Math.round(Number(items[id]) || 0));
     });
+    // トーナメントの状況(形が壊れていれば捨てる)
+    out.tournaments = {};
+    const tours = (raw && raw.tournaments) || {};
+    Object.keys(tours).forEach(id => {
+      const e = tours[id];
+      if (e && Array.isArray(e.bracket) && Array.isArray(e.rounds) && e.rounds.length) out.tournaments[id] = e;
+    });
     return out;
   }
 
@@ -486,9 +498,10 @@
     if (!cache) {
       cache = Promise.all([
         source.loadCharacters(), source.loadTeams(), source.loadProgress(), source.loadGachas(), source.loadOwnedCharacters(),
-        source.loadItems(), source.loadPlayer()
+        source.loadItems(), source.loadPlayer(),
+        source.loadTournaments ? source.loadTournaments() : []
       ])
-        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned, rawItems, rawPlayer]) => {
+        .then(([rawChars, rawTeams, rawProgress, rawGachas, rawOwned, rawItems, rawPlayer, rawTournaments]) => {
           const master = new Map();
           rawChars.forEach(raw => {
             const c = normalizeMaster(raw);
@@ -522,6 +535,7 @@
             shopItems: items.shopItems,
             // 初期の所持アイテム { [itemId]: 所持数 }(マスタ側。変わった分は progress.items)
             initialItems: items.owned,
+            tournaments: normalizeTournaments(rawTournaments, rawTeams, items.master),
             gachas: rawGachas.map(g => normalizeGacha(g, master)),
             playerId: playerId,
             player: normalizePlayer(rawPlayer),
@@ -1004,6 +1018,261 @@
     });
   }
 
+  // ---------- トーナメント ----------
+
+  // 試合結果の名前(負けた時点で残っていたチーム数)
+  const PLACEMENT_LABELS = { 1: '優勝', 2: '準優勝' };
+  function placementLabel(n) {
+    return PLACEMENT_LABELS[n] || 'ベスト' + n;
+  }
+  // ラウンドの名前(そのラウンドに残っているチーム数)
+  function roundName(teamsLeft, roundIndex) {
+    return teamsLeft === 2 ? '決勝' : teamsLeft === 4 ? '準決勝' : teamsLeft === 8 ? '準々決勝' : (roundIndex + 1) + '回戦';
+  }
+
+  // トーナメントマスタの補正。チーム数が合わない・知らないチームがある大会は読み込みエラーにする
+  function normalizeTournaments(raw, rawTeams, itemMaster) {
+    return (raw || []).map(t => {
+      const teamCount = Math.round(Number(t.teamCount));
+      if (!t.id || [2, 4, 8, 16, 32].indexOf(teamCount) < 0) throw new Error('トーナメント "' + t.id + '" のチーム数が正しくありません');
+      const teams = (t.teams || []).map(String);
+      if (teams.length !== teamCount - 1) throw new Error('トーナメント "' + t.id + '" の出場チームが ' + (teamCount - 1) + ' チームではありません');
+      teams.forEach(id => {
+        if (!rawTeams.some(x => String(x.id) === id)) throw new Error('トーナメント "' + t.id + '" に存在しないチーム "' + id + '" が指定されています');
+      });
+      const rules = t.rules || {};
+      return Object.freeze({
+        id: String(t.id),
+        name: t.name || t.id,
+        teamCount: teamCount,
+        rules: Object.freeze({
+          setsToWin: Math.max(1, Math.round(Number(rules.setsToWin) || 2)),
+          setPoints: Math.max(5, Math.round(Number(rules.setPoints) || 25)),
+          finalSetPoints: Math.max(5, Math.round(Number(rules.finalSetPoints) || 15))
+        }),
+        teams: Object.freeze(teams),
+        rewards: Object.freeze((t.rewards || []).filter(r => itemMaster.has(String(r.itemId))).map(r => Object.freeze({
+          placement: Math.round(Number(r.placement)),
+          itemId: String(r.itemId),
+          quantity: Math.max(1, Math.round(Number(r.quantity) || 1))
+        })))
+      });
+    });
+  }
+
+  function requireTournament(d, id) {
+    const t = d.tournaments.find(x => x.id === String(id));
+    if (!t) throw new Error('トーナメントが見つかりません');
+    return t;
+  }
+
+  // チームの強さ(試合用ステータス8項目の、出場7人の平均)。CPU どうしの試合の勝敗に使う
+  function teamRating(d, teamId) {
+    const raw = d.teams.find(t => String(t.id) === String(teamId));
+    if (!raw) return 50;
+    let units;
+    if (String(raw.id) === 'player' && raw.deckSlots) {
+      const deck = deckMembers(d, raw.deckId);
+      units = Object.keys(raw.deckSlots).map(slot => {
+        const e = deck[raw.deckSlots[slot]];
+        const row = e && ownedRow(d, e.playerCharacterId);
+        return row ? applyPositionRate(buildOwned(d, row)) : null;
+      }).filter(Boolean);
+    } else {
+      units = (raw.members || []).map(m => buildUnit(d, null, d.master.get(String(m.characterId)), null));
+    }
+    if (!units.length) return 50;
+    return units.reduce((sum, u) => sum + STATS.reduce((a, s) => a + u.stats[s.key], 0) / STATS.length, 0) / units.length;
+  }
+
+  function randInt(min, max) {
+    return min + Math.floor(Math.random() * (max - min + 1));
+  }
+
+  // CPU どうしの試合を結果だけ決める。強さの差が大きいほど強い方が勝ちやすい(セットごとに判定)。
+  // 1セットを取る確率 = 1 / (1 + e^(-強さの差 / CPU_MATCH_SPREAD))。値を大きくするほど番狂わせが起きやすい
+  const CPU_MATCH_SPREAD = 6;
+  function simulateMatch(d, t, a, b) {
+    const pA = 1 / (1 + Math.exp(-(teamRating(d, a) - teamRating(d, b)) / CPU_MATCH_SPREAD));
+    const sets = [];
+    let wa = 0;
+    let wb = 0;
+    while (wa < t.rules.setsToWin && wb < t.rules.setsToWin) {
+      const final = wa === t.rules.setsToWin - 1 && wb === t.rules.setsToWin - 1;
+      const pts = final ? t.rules.finalSetPoints : t.rules.setPoints;
+      let win = pts;
+      let lose = randInt(Math.max(0, pts - 9), pts - 2);
+      if (Math.random() < 0.15) { win = pts + randInt(1, 3); lose = win - 2; } // デュース
+      if (Math.random() < pA) { wa++; sets.push([win, lose]); } else { wb++; sets.push([lose, win]); }
+    }
+    return { winner: wa > wb ? a : b, sets: sets };
+  }
+
+  function shuffle(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+    }
+    return a;
+  }
+
+  // 今のラウンドの試合をすべて決め(自チームの試合は除く)、全試合が終わっていれば次のラウンドを作る
+  function advanceTournament(d, t, e) {
+    for (;;) {
+      const round = e.rounds[e.rounds.length - 1];
+      round.forEach(m => {
+        if (m.winner || m.a === 'player' || m.b === 'player') return;
+        const r = simulateMatch(d, t, m.a, m.b);
+        m.winner = r.winner;
+        m.sets = r.sets;
+      });
+      if (round.some(m => !m.winner)) return; // 自チームの試合待ち
+      if (round.length === 1) return; // 決勝が終わった
+      const winners = round.map(m => m.winner);
+      const next = [];
+      for (let i = 0; i < winners.length; i += 2) next.push({ a: winners[i], b: winners[i + 1], winner: null, sets: [] });
+      e.rounds.push(next);
+    }
+  }
+
+  function teamName(d, id) {
+    const raw = d.teams.find(x => String(x.id) === String(id));
+    return raw ? (raw.name || raw.id) : String(id);
+  }
+
+  function rewardsFor(d, t, placement) {
+    return t.rewards.filter(r => r.placement === placement).map(r => Object.freeze({
+      item: buildItem(d, d.itemMaster.get(r.itemId)),
+      quantity: r.quantity
+    }));
+  }
+
+  // 自チームが負けた(または優勝した)ら大会を終え、成績と報酬を決めて受け取る
+  function finishIfDecided(d, t, e) {
+    if (e.status !== 'active') return;
+    const roundIndex = e.rounds.findIndex(round => round.some(m => (m.a === 'player' || m.b === 'player') && m.winner && m.winner !== 'player'));
+    const last = e.rounds[e.rounds.length - 1];
+    const won = last.length === 1 && last[0].winner === 'player';
+    if (roundIndex < 0 && !won) return;
+    e.status = 'finished';
+    e.placement = won ? 1 : t.teamCount / Math.pow(2, roundIndex);
+    advanceTournament(d, t, e); // 負けた後の試合も最後まで決める(優勝チームを見せるため)
+    e.rewards = t.rewards.filter(r => r.placement === e.placement).map(r => ({ itemId: r.itemId, quantity: r.quantity }));
+    e.rewards.forEach(r => { d.progress.items[r.itemId] = itemCount(d, r.itemId) + r.quantity; });
+  }
+
+  // 画面に渡すトーナメント(マスタ + 自分の出場状況)
+  function buildTournament(d, t) {
+    const e = d.progress.tournaments[t.id] || null;
+    const team = id => Object.freeze({ id: id, name: teamName(d, id), isPlayer: id === 'player' });
+    let entry = null;
+    if (e) {
+      const rounds = e.rounds.map((round, i) => Object.freeze({
+        name: roundName(t.teamCount / Math.pow(2, i), i),
+        matches: Object.freeze(round.map(m => Object.freeze({
+          a: team(m.a),
+          b: team(m.b),
+          winner: m.winner,
+          sets: Object.freeze((m.sets || []).map(x => Object.freeze(x.slice())))
+        })))
+      }));
+      let nextMatch = null;
+      if (e.status === 'active') {
+        const i = e.rounds.length - 1;
+        const m = e.rounds[i].find(x => !x.winner && (x.a === 'player' || x.b === 'player'));
+        if (m) nextMatch = Object.freeze({ roundIndex: i, roundName: rounds[i].name, opponent: team(m.a === 'player' ? m.b : m.a) });
+      }
+      const champion = e.status === 'finished' && e.rounds.length === Math.log2(t.teamCount) ? e.rounds[e.rounds.length - 1][0].winner : null;
+      entry = Object.freeze({
+        status: e.status,
+        rounds: Object.freeze(rounds),
+        nextMatch: nextMatch,
+        placement: e.placement || null,
+        placementLabel: e.placement ? placementLabel(e.placement) : null,
+        champion: champion ? team(champion) : null,
+        rewards: Object.freeze((e.rewards || []).filter(r => d.itemMaster.has(r.itemId)).map(r => Object.freeze({
+          item: buildItem(d, d.itemMaster.get(r.itemId)),
+          quantity: r.quantity
+        })))
+      });
+    }
+    const placements = [];
+    for (let n = 1; n <= t.teamCount; n *= 2) placements.push(n);
+    return Object.freeze({
+      id: t.id,
+      name: t.name,
+      teamCount: t.teamCount,
+      rules: t.rules,
+      teams: Object.freeze(t.teams.map(team)),
+      rewards: Object.freeze(placements.map(n => Object.freeze({
+        placement: n,
+        label: placementLabel(n),
+        items: rewardsFor(d, t, n)
+      }))),
+      entry: entry
+    });
+  }
+
+  /** トーナメントの一覧(マスタの順)。各大会の自分の出場状況(entry)も含む。 */
+  function getTournaments() {
+    return load().then(d => d.tournaments.map(t => buildTournament(d, t)));
+  }
+
+  /**
+   * トーナメント1つ。entry は出場中・最後に出た大会の状況(出たことが無ければ null):
+   *   { status: 'active'|'finished', rounds: [{ name, matches: [{ a, b, winner, sets: [[a側, b側]] }] }],
+   *     nextMatch: { roundIndex, roundName, opponent: { id, name } } | null, placement, placementLabel, champion, rewards }
+   */
+  function getTournament(id) {
+    return load().then(d => buildTournament(d, requireTournament(d, id)));
+  }
+
+  /** トーナメントに出場する(組み合わせは抽選)。出場中の大会があればエラー。 */
+  function enterTournament(id) {
+    return load().then(d => {
+      const t = requireTournament(d, id);
+      const cur = d.progress.tournaments[t.id];
+      if (cur && cur.status === 'active') throw new Error('この大会には出場中です');
+      requireLineupDeck(d);
+      const bracket = shuffle(['player'].concat(t.teams));
+      const first = [];
+      for (let i = 0; i < bracket.length; i += 2) first.push({ a: bracket[i], b: bracket[i + 1], winner: null, sets: [] });
+      const e = { bracket: bracket, rounds: [first], status: 'active', placement: null, rewards: [] };
+      d.progress.tournaments[t.id] = e;
+      advanceTournament(d, t, e);
+      return save(d).then(() => buildTournament(d, t));
+    });
+  }
+
+  /**
+   * 自チームの試合結果を記録する。同じラウンドの他の試合も決め、負けたら(または優勝したら)大会を終えて報酬を受け取る。
+   * @param {string} id - トーナメントID
+   * @param {{ win: boolean, sets?: Array<[自チーム, 相手]> }} result
+   * @returns {Promise<tournament>} 記録後のトーナメント(entry.status が 'finished' なら終了。報酬は entry.rewards)
+   */
+  function recordTournamentMatch(id, result) {
+    return load().then(d => {
+      const t = requireTournament(d, id);
+      const e = d.progress.tournaments[t.id];
+      if (!e || e.status !== 'active') throw new Error('この大会には出場していません');
+      const m = e.rounds[e.rounds.length - 1].find(x => !x.winner && (x.a === 'player' || x.b === 'player'));
+      if (!m) throw new Error('次の試合がありません');
+      const opponent = m.a === 'player' ? m.b : m.a;
+      m.winner = result && result.win ? 'player' : opponent;
+      // セットの得点は [a側, b側] で持つ
+      m.sets = ((result && result.sets) || []).map(s => (m.a === 'player' ? [s[0], s[1]] : [s[1], s[0]]));
+      advanceTournament(d, t, e);
+      finishIfDecided(d, t, e);
+      return save(d).then(() => buildTournament(d, t));
+    });
+  }
+
+  /** 出場中の大会を棄権する(今の試合を負けとして終える。それまでの成績の報酬は受け取る)。 */
+  function withdrawTournament(id) {
+    return recordTournamentMatch(id, { win: false, sets: [] });
+  }
+
   // ---------- プレイヤー ----------
 
   /**
@@ -1090,6 +1359,11 @@
     configure: configure,
     getTeam: getTeam,
     getPlayer: getPlayer,
+    getTournaments: getTournaments,
+    getTournament: getTournament,
+    enterTournament: enterTournament,
+    recordTournamentMatch: recordTournamentMatch,
+    withdrawTournament: withdrawTournament,
     allocatePoints: allocatePoints,
     getActiveGachas: getActiveGachas,
     getGacha: getGacha,
