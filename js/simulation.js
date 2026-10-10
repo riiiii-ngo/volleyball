@@ -104,6 +104,11 @@
   const CPU_TIP_RATE = 0.06;         // CPUがフェイントを選ぶ確率(2枚ブロックの時は+0.06)
   const CPU_DUMP_RATE = 0.06;        // 前衛セッターがAパスをツーアタックする確率
   const CPU_COMMIT_RATE = 0.4;       // CPUのMBが相手のクイックにつられて跳ぶ確率
+  const CPU_LATE_ADJUST = 0.2;       // CPUのスパイクは打つコースをトスの時に決める。決めたコースがブロックで塞がれていたら、打つ瞬間にこの確率で変える
+  const BLOCK_READ = 0.6;            // CPUのブロックは、操作中のチームの打つ選手の向き(狙い)を読んで、そのコースへこの割合だけ寄る
+  const DIG_READ = 0.35;             // 守備は打つ選手の向き(狙い)を読み、狙いに一番近い選手がそちらへこの割合だけ寄る(最大 DIG_READ_MAX m)
+  const DIG_READ_MAX = 1.5;
+  const FACE_AFTER_HIT = 0.3;        // 打った後もしばらく打った方向を向いたままにする
   const OUT_JUDGE_MARGIN = 0.15;     // 相手の打球がこれ以上外に落ちる時は見送る
 
   // ---- 選手の動き ----
@@ -777,7 +782,15 @@
       const hitP = posAt(f, hitT - at);
       if (f.attackKey !== 'quick') approach(atk, null, hitT, at, hitP);
       else { atk.goal = { x: hitP.x, z: hitP.z + T.s * 0.2 }; atk.moveSpeed = atk.ab.speed; }
-      if (T.side === control) { aiming = true; aimDeadline = hitT; }
+      // 打つコース:操作中のチームはジョイスティックの狙い、CPU はトスが上がった時に決める。
+      // 打つ選手はトスから打つまで、そのコースの方を向く(相手はそれを見てブロック・守備の位置を決められる)
+      if (T.side === control) {
+        aiming = true; aimDeadline = hitT;
+        atk.intent = null;
+      } else {
+        atk.intent = cpuAttackAim(T, teams[other(T.side)], { x: hitP.x, y: hitP.y, z: hitP.z }, false);
+      }
+      atk.facing = { aim: atk.intent ? atk.intent.aim : null, until: hitT + FACE_AFTER_HIT };
       schedule(hitT, aAt => {
         aiming = false;
         const ball = posAt(f, aAt - f.t0);
@@ -805,7 +818,10 @@
         schedule(moveAt || at + REACTION, () => moveTo(p, pos, 0.9));
         schedule(jumpAt, jAt => { if (!airborne(p, jAt)) startJump(p, jAt, BLOCK_UP, p.ab.jumpHeight * 0.8, 'block'); });
       };
-      if (wing) blockAt(wing, a + side * 0.2);
+      // 打つ選手の向き(狙い)を読んで寄るための計画(readAttack で毎フレーム使う)
+      const plan = { from: { x: attackP.x, z: attackP.z }, startAt: at + REACTION, hitT: hitT, blockers: [], spots: [] };
+      D.readPlan = plan;
+      if (wing) { blockAt(wing, a + side * 0.2); plan.blockers.push({ p: wing, lx: a + side * 0.2 }); }
       if (mb) {
         if (D.side === control) {
           blockControl = true;
@@ -815,10 +831,12 @@
             if (!airborne(mb, jAt)) startJump(mb, jAt, BLOCK_UP, mb.ab.jumpHeight * 0.8, 'block');
           });
         } else if (D.mbCommit && attackKey !== 'quick') {
-          // クイックにつられて跳んだMBは、着地してから遅れて寄る
+          // クイックにつられて跳んだMBは、着地してから遅れて寄る(読みで寄るのも着地してから)
           blockAt(mb, side ? a - side * 0.55 : a, Math.max(at + REACTION, D.mbCommit.landAt));
+          plan.blockers.push({ p: mb, lx: side ? a - side * 0.55 : a, from: D.mbCommit.landAt });
         } else {
           blockAt(mb, side ? a - side * 0.55 : a);
+          plan.blockers.push({ p: mb, lx: side ? a - side * 0.55 : a });
         }
       }
       D.mbCommit = null;
@@ -828,6 +846,7 @@
         if (!p) return;
         const lx = side ? -side * 1.6 : (p.slot === 'FL' ? -2.2 : 2.2);
         schedule(at + REACTION, () => moveLocal(p, { lx: lx, d: 3.2 }));
+        plan.spots.push({ p: p, spot: Wp(D, { lx: lx, d: 3.2 }) });
       });
       // 後衛: ストレート・クロス・後ろ
       const spots = side
@@ -837,7 +856,47 @@
       const crossSlot = side >= 0 ? 'BL' : 'BR';
       [[lineSlot, spots.line], [crossSlot, spots.cross], ['BM', spots.deep]].forEach(([slot, spot]) => {
         const p = bySlot(D, slot);
-        if (p) schedule(at + REACTION, () => moveLocal(p, spot));
+        if (p) {
+          schedule(at + REACTION, () => moveLocal(p, spot));
+          plan.spots.push({ p: p, spot: Wp(D, spot) });
+        }
+      });
+    }
+
+    // 打つ選手の向き(狙い)を読んで、ブロック・守備が寄る。トスが上がってから打つまで毎フレーム。
+    //   - ブロック:CPU のチームだけ(操作中のチームのMBはプレイヤーが動かす)。狙いのコースがネットを通る位置へ BLOCK_READ だけ寄る
+    //   - 守備:狙いに一番近い選手が、狙いへ DIG_READ だけ寄る(最大 DIG_READ_MAX m)
+    function readAttack() {
+      ['near', 'far'].forEach(side => {
+        const D = teams[side];
+        const rp = D.readPlan;
+        if (!rp) return;
+        if (time > rp.hitT) { D.readPlan = null; return; }
+        if (time < rp.startAt) return;
+        const A = teams[other(side)];
+        const atk = A.onCourt.find(p => p.facing && p.facing.until > time);
+        const aim = atk ? (atk.facing.aim || (A.side === control ? target : null)) : null;
+        if (!aim) return;
+        if (side !== control && rp.from.z * (rp.from.z - aim.z) > 0) {
+          const t = rp.from.z / (rp.from.z - aim.z);
+          const laneLx = L(D, rp.from.x + (aim.x - rp.from.x) * t, 0).lx;
+          const shift = (laneLx - L(D, rp.from.x, 0).lx) * BLOCK_READ;
+          const lim = HALF_W - 0.3;
+          rp.blockers.forEach(b => {
+            if (airborne(b.p, time) || (b.from && time < b.from)) return;
+            moveTo(b.p, W(D, clamp(b.lx + shift, -lim, lim), BLOCK_NET_D), 0.9);
+          });
+        }
+        let near = null;
+        rp.spots.forEach(s => { if (!near || hypot2(s.spot, aim) < hypot2(near.spot, aim)) near = s; });
+        rp.spots.forEach(s => {
+          if (airborne(s.p, time)) return;
+          if (s !== near) { moveTo(s.p, s.spot); return; }
+          const dx = aim.x - s.spot.x, dz = aim.z - s.spot.z;
+          const len = Math.hypot(dx, dz);
+          const k = len > 0 ? Math.min(DIG_READ * len, DIG_READ_MAX) / len : 0;
+          moveTo(s.p, { x: s.spot.x + dx * k, z: s.spot.z + dz * k });
+        });
       });
     }
 
@@ -885,9 +944,22 @@
         aim = { x: target.x, y: R, z: target.z };
         if (L(O, aim.x, aim.z).d < TIP_DEPTH) tip = true;
       } else {
-        const r = cpuAttackAim(T, O, from, tip);
-        aim = r.aim; tip = r.tip;
+        // トスの時に決めたコースで打つ。そのコースがブロックで塞がれていたら、CPU_LATE_ADJUST の確率で打つ瞬間に変える
+        const intent = atk.intent;
+        if (intent && !(tip && !intent.tip)) {
+          aim = intent.aim; tip = intent.tip;
+          if (!tip && courseBlocked(O, from, aim) && Math.random() < CPU_LATE_ADJUST) {
+            const r = cpuAttackAim(T, O, from, false);
+            aim = r.aim; tip = r.tip;
+            atk.facing = { aim: aim, until: at + FACE_AFTER_HIT };
+          }
+        } else {
+          const r = cpuAttackAim(T, O, from, tip);
+          aim = r.aim; tip = r.tip;
+        }
       }
+      atk.intent = null;
+      if (T.side === control) atk.facing = { aim: { x: aim.x, z: aim.z }, until: at + FACE_AFTER_HIT };
       emit('attack', { side: T.side, kind: tip ? 'tip' : 'spike' });
       act(atk, tip ? 'tip' : 'spike', at);
       if (tip) {
@@ -922,17 +994,24 @@
       return from.y + v.y * tc - 0.5 * gg * tc * tc - NET_CLEAR;
     }
 
+    // ブロックに跳ぶ(跳びそうな)選手と、from から c へのコースがその手の範囲を通るか
+    function blockersOf(O) {
+      return O.onCourt.filter(p => Math.abs(p.z) < 1.2 && (airborne(p, time) || (p.goal && Math.abs(p.goal.z) < 1.0)));
+    }
+    function courseBlocked(O, from, c, blockers) {
+      const bs = blockers || blockersOf(O);
+      if (!bs.length) return false;
+      const spanX = p => (p.goal && Math.abs(p.goal.z) < 1.0 ? p.goal.x : p.x);
+      const t = from.z / (from.z - c.z);
+      const xAt = from.x + (c.x - from.x) * t;
+      return bs.some(b => Math.abs(xAt - spanX(b)) <= b.ab.blockReach);
+    }
+
     // CPU のスパイクの狙い。ブロックで塞がれていないコースのうち、守備から一番遠い所(守備の隙)を狙う。
     function cpuAttackAim(T, O, from, forceTip) {
-      const blockers = O.onCourt.filter(p => Math.abs(p.z) < 1.2 && (airborne(p, time) || (p.goal && Math.abs(p.goal.z) < 1.0)));
-      const spanX = p => (p.goal && Math.abs(p.goal.z) < 1.0 ? p.goal.x : p.x);
+      const blockers = blockersOf(O);
       const defenders = O.onCourt.filter(p => !blockers.includes(p));
-      const blocked = c => {
-        if (!blockers.length) return false;
-        const t = from.z / (from.z - c.z);
-        const xAt = from.x + (c.x - from.x) * t;
-        return blockers.some(b => Math.abs(xAt - spanX(b)) <= b.ab.blockReach);
-      };
+      const blocked = c => courseBlocked(O, from, c, blockers);
       const gapOf = c => {
         let g = Infinity;
         defenders.forEach(p => { g = Math.min(g, hypot2(c, p.goal || p)); });
@@ -1079,6 +1158,8 @@
       setChoice = null;
       aiming = false;
       blockControl = false;
+      teams.near.readPlan = null;
+      teams.far.readPlan = null;
       rallyToken++;
       clearPlannedActions(at, true);
       schedule(at + DEAD_HOLD, aAt => awardPoint(winner, aAt), 'match');
@@ -1167,6 +1248,7 @@
       time += dt;
       processEvents();
       handleControls(dt, joy, inputDt == null ? dt : inputDt);
+      readAttack();
       updatePlayers(dt);
       if (flight) {
         ballSpin.x += dt * 9;
@@ -1242,6 +1324,11 @@
           const tz = p.onCourt ? ball.z : p.z;
           let yaw = Math.atan2(tx - p.x, tz - p.z);
           if (!p.onCourt) yaw = Math.atan2(-p.x, 0);
+          // スパイクを打つ選手は、トスから打った直後まで打つコースの方を向く(操作中のチームは今の狙い)
+          if (p.onCourt && p.facing && time < p.facing.until) {
+            const aim = p.facing.aim || (p.side === control ? target : null);
+            if (aim) yaw = Math.atan2(aim.x - p.x, aim.z - p.z);
+          }
           // action: 見た目の動作。t は触る(跳ぶ動作は最高点の)時刻からの経過秒(触る前は負)
           const a = p.action && time - p.action.at < ACTION_HOLD ? { kind: p.action.kind, t: time - p.action.at } : null;
           return {
