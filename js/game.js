@@ -165,7 +165,19 @@
       onEvent: options.onEvent || null
     });
 
-    const onServe = () => simulation.serve();
+    // サーブボタンは指が触れた時点で反応させる(ジョイスティックを別の指で押さえたままだと、
+    // ブラウザが click を出さないことがあるため)。マウス・キーボードは今まで通り click で受ける。
+    let lastTouchServe = -Infinity;
+    const onServePointer = (e) => {
+      if (e.pointerType === 'mouse' || serveBtn.disabled) return;
+      lastTouchServe = performance.now();
+      simulation.serve();
+    };
+    const onServe = () => {
+      if (performance.now() - lastTouchServe < 800) return; // 指で押した直後の click は二重にしない
+      simulation.serve();
+    };
+    serveBtn.addEventListener('pointerdown', onServePointer);
     serveBtn.addEventListener('click', onServe);
 
     // ---------- 背景の壁（環境。モデル本体には含めない） ----------
@@ -269,6 +281,7 @@
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
       serveBtn.removeEventListener('click', onServe);
+      serveBtn.removeEventListener('pointerdown', onServePointer);
       joystick.destroy();
       timerEl.remove();
       // ジオメトリ/マテリアル/テクスチャを解放(画面を行き来してもGPUメモリが増えないように)

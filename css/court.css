@@ -14,7 +14,18 @@
   color: var(--navy-300);
 }
 
+/* ジョイスティックのタッチ受付(画面全体。ボタン類(z-index 10)より下、3D描画より上) */
+.vb-joystick-area {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 .vb-joystick-base {
+  pointer-events: none; /* 入力は .vb-joystick-area で受ける(台座の上を触っても、その場所が中心になる) */
   position: fixed;
   left: 50%;
   bottom: max(28px, env(safe-area-inset-bottom, 28px));
