@@ -33,6 +33,9 @@ html, body {
   /* ダブルタップでのズームを無効にする(子要素にも効く。コートの操作部分は court.css で none) */
   touch-action: manipulation;
 }
+/* ダブルタップでのズームを全要素で無効にする(iOS Safari は html/body だけでは効かないことがある)。
+   touch-action を個別に指定している要素(ジョイスティックの none など)はそちらが優先される */
+*, *::before, *::after { touch-action: manipulation; }
 button, a { font: inherit; color: inherit; }
 
 .screen {
