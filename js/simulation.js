@@ -57,6 +57,7 @@
   const JUMP_UP = 0.4;         // スパイクのジャンプ: 踏み切りから最高点(打点)まで
   const BLOCK_UP = 0.3;        // ブロックのジャンプ: 踏み切りから最高点まで
   const SERVE_TOSS_TIME = 0.55; // サーブのトスを上げてから打つまで
+  const ACTION_HOLD = 1.2;     // 触ってから動作(モーション)を渡し続ける秒数
   const DEAD_HOLD = 1.2;       // ボールが落ちてから得点が入るまで
   const BETWEEN_POINTS = 2.2;  // 得点が入ってからサーブを打てるようになるまで(この間に次の陣形へ歩く)
   const CPU_SERVE_DELAY = 0.9; // サーブを打てるようになってからCPUが打つまで
@@ -227,7 +228,7 @@
         const p = {
           id: m.id, side: side, role: m.role, order: m.order,
           base: base, ab: Object.assign({}, base), fatigue: 0,
-          x: 0, y: 0, z: 0, goal: null, moveSpeed: 0, jump: null,
+          x: 0, y: 0, z: 0, goal: null, moveSpeed: 0, jump: null, action: null,
           zone: null, slot: null, onCourt: false
         };
         T.members.push(p);
@@ -308,7 +309,23 @@
       p.moveSpeed = p.ab.speed * (speedMul || 1);
     }
     function moveLocal(p, spot, speedMul) { moveTo(p, Wp(teams[p.side], spot), speedMul); }
-    function startJump(p, at, up, h) { p.jump = { start: at, up: up, h: h }; tire(p, FATIGUE_JUMP); }
+    function startJump(p, at, up, h, kind) {
+      p.jump = { start: at, up: up, h: h };
+      tire(p, FATIGUE_JUMP);
+      if (kind) act(p, kind, at + up);
+    }
+    // 見た目の動作(モーション)。kind の動作でボールに触る(跳ぶならジャンプの最高点の)時刻 at を覚えておき、
+    // getState() で触る時刻からの経過時間として渡す(触る前の構え・助走の腕の振りも描けるように予定の時点で入れる)。
+    //   'pass' レシーブ / 'dive' 飛びついてレシーブ / 'set' オーバーハンドのトス / 'bump' アンダーの二段トス /
+    //   'spike' / 'tip' / 'block' / 'floatServe' / 'jumpServe'
+    function act(p, kind, at) { p.action = { kind: kind, at: at }; }
+    // 打球が変わったら、まだ触っていないレシーブ・トスの予定は取り消す(新しい打球で予定し直す)
+    const FLIGHT_ACTIONS = { pass: true, dive: true, set: true, bump: true };
+    function clearPlannedActions(at, all) {
+      allPlayers.forEach(p => {
+        if (p.action && p.action.at > at && (all || FLIGHT_ACTIONS[p.action.kind])) p.action = null;
+      });
+    }
     function airborne(p, at) { return !!p.jump && at >= p.jump.start && at < p.jump.start + 2 * p.jump.up; }
     function jumpY(p, at) {
       if (!p.jump) return 0;
@@ -391,6 +408,7 @@
 
     function startFlight(f, at) {
       flightToken++;
+      clearPlannedActions(at, false);
       flight = f;
       f.t0 = at;
       ballDead = null;
@@ -532,7 +550,9 @@
       // セッターはレシーブが上がる前から返球先へ向かう(ペネトレーション)
       const setter = setterOf(T);
       if (setter && setter !== p && !airborne(setter, at)) schedule(at + reaction, () => moveLocal(setter, SETTER_TARGET));
-      schedule(at + c.t, cAt => digContact(T, p, f, cAt, best.arrive > c.t - 0.15));
+      const stretched = best.arrive > c.t - 0.15;
+      act(p, stretched ? 'dive' : 'pass', at + c.t);
+      schedule(at + c.t, cAt => digContact(T, p, f, cAt, stretched));
     }
 
     function digContact(T, p, f, at, stretched) {
@@ -540,6 +560,7 @@
       p.x = hit.x; p.z = hit.z; p.goal = null;
       T.touches = 1;
       T.lastToucher = p;
+      act(p, stretched ? 'dive' : 'pass', at);
       tire(p, FATIGUE_DIG * (stretched ? 2 : 1));
       // 打球が速い・強いほど返球が乱れる
       const speed = Math.hypot(f.v.x, f.v.z);
@@ -602,6 +623,7 @@
       const quality = plan.isSetter ? (f.quality || 'B') : 'C';
       const options = setOptions(T, quality, plan.p);
       const setAt = at + plan.c.t;
+      act(plan.p, plan.isSetter ? 'set' : 'bump', setAt);
 
       // Aパスで前衛MBがいればクイックに入る(上がらなければおとり)
       T.quickPlan = null;
@@ -619,7 +641,7 @@
           D.mbCommit = { landAt: contactT + BLOCK_UP + 0.1 };
           const q = Wp(T, spot);
           schedule(setAt, () => moveTo(dmb, { x: q.x, z: D.s * BLOCK_NET_D }, 0.9), 'rally');
-          schedule(contactT - BLOCK_UP, jAt => startJump(dmb, jAt, BLOCK_UP, dmb.ab.jumpHeight * 0.8), 'rally');
+          schedule(contactT - BLOCK_UP, jAt => startJump(dmb, jAt, BLOCK_UP, dmb.ab.jumpHeight * 0.8, 'block'), 'rally');
         }
       }
       transitionOffense(T, plan.p, at);
@@ -711,6 +733,7 @@
       const dist = hypot2(p, take);
       p.goal = { x: take.x, z: take.z };
       p.moveSpeed = clamp(dist / runTime, p.ab.speed * 0.6, p.ab.speed * 1.3);
+      act(p, 'spike', contactT);
       schedule(jumpAt, jAt => {
         startJump(p, jAt, JUMP_UP, p.ab.jumpHeight);
         moveTo(p, c, 0.5); // 空中で少し前へ流れる
@@ -723,6 +746,7 @@
       p.x = hit.x; p.z = hit.z; p.goal = null;
       T.touches = 2;
       T.lastToucher = p;
+      act(p, plan.isSetter ? 'set' : 'bump', at);
       let key;
       if (T.side === control && setChoice) key = setChoice.zones[setChoice.zone].key || setChoice.zones.left.key;
       else key = cpuSetChoice(options, quality);
@@ -779,7 +803,7 @@
       const blockAt = (p, lx, moveAt) => {
         const pos = W(D, clamp(lx, -lim, lim), BLOCK_NET_D);
         schedule(moveAt || at + REACTION, () => moveTo(p, pos, 0.9));
-        schedule(jumpAt, jAt => { if (!airborne(p, jAt)) startJump(p, jAt, BLOCK_UP, p.ab.jumpHeight * 0.8); });
+        schedule(jumpAt, jAt => { if (!airborne(p, jAt)) startJump(p, jAt, BLOCK_UP, p.ab.jumpHeight * 0.8, 'block'); });
       };
       if (wing) blockAt(wing, a + side * 0.2);
       if (mb) {
@@ -788,7 +812,7 @@
           blockDeadline = jumpAt;
           schedule(jumpAt, jAt => {
             blockControl = false;
-            if (!airborne(mb, jAt)) startJump(mb, jAt, BLOCK_UP, mb.ab.jumpHeight * 0.8);
+            if (!airborne(mb, jAt)) startJump(mb, jAt, BLOCK_UP, mb.ab.jumpHeight * 0.8, 'block');
           });
         } else if (D.mbCommit && attackKey !== 'quick') {
           // クイックにつられて跳んだMBは、着地してから遅れて寄る
@@ -850,6 +874,7 @@
       const O = teams[other(T.side)];
       const from = { x: hit.x, y: hit.y, z: hit.z };
       if (kind === 'free') {
+        act(atk, airborne(atk, at) ? 'tip' : 'pass', at);
         emit('attack', { side: T.side, kind: 'free' });
         const to = W(O, (Math.random() * 2 - 1) * 2.5, 4 + Math.random() * 3.5);
         launchOver('free', T.side, from, { x: to.x, y: R, z: to.z }, 1.5, 0.6, { touchNo: 3 }, at);
@@ -864,6 +889,7 @@
         aim = r.aim; tip = r.tip;
       }
       emit('attack', { side: T.side, kind: tip ? 'tip' : 'spike' });
+      act(atk, tip ? 'tip' : 'spike', at);
       if (tip) {
         launchOver('tip', T.side, from, scatter(aim, 0.35), 0.9, 0.3, { touchNo: 3 }, at);
         return;
@@ -933,6 +959,7 @@
       if (!r) return;
       schedule(at + TEAM_REACTION, () => moveTo(r.p, c.p));
       if (!r.ok) return;
+      act(r.p, 'pass', at + c.t);
       schedule(at + c.t, cAt => {
         const hit = posAt(f, cAt - f.t0);
         attackBy(T, r.p, hit, cAt, 'free', 0);
@@ -1010,6 +1037,7 @@
       const contactZ = sv.ab.jumpServe ? sv.z - T.s * 1.2 : sv.z - T.s * 0.3;
       const contact = { x: sv.x, y: contactH, z: contactZ };
       launch('serveToss', T.side, hand, contact, SERVE_TOSS_TIME, {}, at);
+      act(sv, sv.ab.jumpServe ? 'jumpServe' : 'floatServe', at + SERVE_TOSS_TIME);
       if (sv.ab.jumpServe) {
         moveTo(sv, { x: sv.x, z: contactZ + T.s * 0.2 }, 0.6);
         schedule(at + SERVE_TOSS_TIME - JUMP_UP, jAt => startJump(sv, jAt, JUMP_UP, sv.ab.jumpHeight * 0.85));
@@ -1052,6 +1080,7 @@
       aiming = false;
       blockControl = false;
       rallyToken++;
+      clearPlannedActions(at, true);
       schedule(at + DEAD_HOLD, aAt => awardPoint(winner, aAt), 'match');
     }
 
@@ -1206,14 +1235,20 @@
         target: { x: target.x, z: target.z },
         targetVisible: canServe() || aiming,
         ball: { x: ball.x, y: ball.y, z: ball.z, rotX: ballSpin.x, rotZ: ballSpin.z },
-        players: allPlayers.map(p => {
+        // サーブを打つ選手(サーブ待ち・トス中だけ)
+        players: (server => allPlayers.map(p => {
           // コート内の選手はボールの方を向く(ベンチの選手はコートの方)
           const tx = p.onCourt ? ball.x : 0;
           const tz = p.onCourt ? ball.z : p.z;
           let yaw = Math.atan2(tx - p.x, tz - p.z);
           if (!p.onCourt) yaw = Math.atan2(-p.x, 0);
-          return { id: p.id, x: p.x, y: p.y, z: p.z, yaw: yaw, onCourt: p.onCourt, role: p.role, slot: p.slot, fatigue: p.fatigue };
-        }),
+          // action: 見た目の動作。t は触る(跳ぶ動作は最高点の)時刻からの経過秒(触る前は負)
+          const a = p.action && time - p.action.at < ACTION_HOLD ? { kind: p.action.kind, t: time - p.action.at } : null;
+          return {
+            id: p.id, x: p.x, y: p.y, z: p.z, yaw: yaw, onCourt: p.onCourt, role: p.role, slot: p.slot, fatigue: p.fatigue,
+            action: a, server: p === server
+          };
+        }))(phase === 'preServe' || phase === 'serving' ? serverOf(teams[servingSide]) : null),
         canServe: canServe(),
         setChoice: setChoice ? {
           zones: {
@@ -1222,6 +1257,8 @@
             right: { label: setChoice.zones.right.label, enabled: setChoice.zones.right.enabled }
           },
           active: setChoice.zone,
+          // 今選んでいるトスを打つ選手の id(頭の上に▼を出す)
+          targetId: (k => (k && setChoice.options[k] ? setChoice.options[k].p.id : null))(setChoice.zones[setChoice.zone].key),
           quality: setChoice.quality
         } : null,
         blockControl: blockControl,

@@ -42,6 +42,9 @@
           id: side + '-' + m.slot,
           role: SLOT_ROLES[m.slot].role,
           order: SLOT_ROLES[m.slot].order,
+          number: m.character.number,
+          height: m.character.height,
+          name: String(m.character.name || '').split(/[\s　]+/)[0], // 頭の上に出す名前(姓)
           ability: VolleyballStats.toPlayParams(m.character.stats, m.character.height)
         }))
       };
@@ -101,8 +104,8 @@
     // ---------- 選手モデル（6人+リベロ×2チーム） ----------
     const players = VolleyballPlayers.create({
       teams: {
-        near: simTeams.near.members.map(m => ({ id: m.id, libero: m.role === 'L' })),
-        far: simTeams.far.members.map(m => ({ id: m.id, libero: m.role === 'L' }))
+        near: simTeams.near.members.map(m => ({ id: m.id, libero: m.role === 'L', number: m.number, height: m.height })),
+        far: simTeams.far.members.map(m => ({ id: m.id, libero: m.role === 'L', number: m.number, height: m.height }))
       }
     });
     scene.add(players);
@@ -146,6 +149,50 @@
 
     // ---------- ジョイスティック ----------
     const joystick = VolleyballJoystick.create({ parent: joystickParent });
+
+    // ---------- 選手の頭の上の表示(名前・体力バー・トスを上げる選手の▼) ----------
+    // 3D の頭の位置を画面の座標に変えて、DOM の札を重ねる(文字をくっきり出すため)
+    const tagLayer = document.createElement('div');
+    tagLayer.className = 'vb-player-tags';
+    joystickParent.appendChild(tagLayer);
+    const tags = new Map();
+    ['near', 'far'].forEach(side => simTeams[side].members.forEach(m => {
+      const el = document.createElement('div');
+      el.className = 'vb-ptag is-' + side + (m.role === 'L' ? ' is-libero' : '');
+      el.innerHTML = '<span class="vb-ptag-arrow">▼</span><span class="vb-ptag-name"></span>' +
+        '<span class="vb-ptag-bar"><span class="vb-ptag-fill"></span></span>';
+      el.querySelector('.vb-ptag-name').textContent = m.name || '';
+      tagLayer.appendChild(el);
+      tags.set(m.id, {
+        el: el, arrow: el.querySelector('.vb-ptag-arrow'), fill: el.querySelector('.vb-ptag-fill'),
+        head: (m.height > 0 ? m.height : 180) / 100 + 0.22, shown: null, target: null, stamina: null, level: null
+      });
+    }));
+    const tagPos = new THREE.Vector3();
+    function applyTags(state) {
+      const targetId = state.setChoice ? state.setChoice.targetId : null;
+      const w = window.innerWidth, h = window.innerHeight;
+      state.players.forEach(p => {
+        const t = tags.get(p.id);
+        if (!t) return;
+        tagPos.set(p.x, p.y + t.head, p.z).project(camera);
+        const show = p.onCourt && tagPos.z < 1;
+        if (show !== t.shown) { t.shown = show; t.el.hidden = !show; }
+        if (!show) return;
+        const sx = (tagPos.x + 1) / 2 * w, sy = (1 - tagPos.y) / 2 * h;
+        t.el.style.transform = 'translate(' + sx.toFixed(1) + 'px,' + sy.toFixed(1) + 'px)';
+        const isTarget = p.id === targetId;
+        if (isTarget !== t.target) { t.target = isTarget; t.el.classList.toggle('is-target', isTarget); }
+        // 体力 = 1 - 疲れ。残りで色を変える(緑 → 黄 → 赤)
+        const stamina = Math.round((1 - p.fatigue) * 100) / 100;
+        if (stamina !== t.stamina) {
+          t.stamina = stamina;
+          t.fill.style.transform = 'scaleX(' + stamina + ')';
+          const level = stamina > 0.5 ? 'high' : (stamina > 0.25 ? 'mid' : 'low');
+          if (level !== t.level) { if (t.level) t.el.classList.remove('is-' + t.level); t.el.classList.add('is-' + level); t.level = level; }
+        }
+      });
+    }
 
     // ---------- 操作の残り時間バー(画面上部) ----------
     const timerEl = document.createElement('div');
@@ -205,7 +252,10 @@
     // ---------- 描画ループ ----------
     const clock = new THREE.Clock();
 
-    function applyState(state) {
+    // 構える場面(サーブを待つ〜ラリーの間)。サーバー以外のコート上の選手が腰を落とす
+    const READY_PHASES = { preServe: true, serving: true, rally: true };
+
+    function applyState(state, simDt) {
       targetMarker.position.set(state.target.x, 0.05, state.target.z);
       targetMarker.visible = state.targetVisible;
 
@@ -216,11 +266,20 @@
       state.players.forEach(p => {
         const mesh = playerMeshes.get(p.id);
         if (!mesh) return;
+        const moved = Math.hypot(p.x - mesh.position.x, p.z - mesh.position.z);
         mesh.position.set(p.x, p.y, p.z);
         // 向きはなめらかに変える(急に振り向かない)
         let diff = p.yaw - mesh.rotation.y;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         mesh.rotation.y += diff * 0.25;
+        // 体の動き(走る・構える・レシーブ・トス・スパイク・ブロック・サーブ)
+        VolleyballPlayers.animate(mesh, {
+          dt: simDt,
+          moved: moved < 1.5 ? moved : 0, // 陣形の入れ替えで瞬間移動した時は走らせない
+          ready: p.onCourt && !p.server && !!READY_PHASES[state.phase],
+          airborne: p.y > 0.02,
+          action: p.action
+        });
       });
 
       serveBtn.disabled = !state.canServe;
@@ -263,7 +322,8 @@
       simulation.update(realDt * scale, joystick.value, realDt);
       state = simulation.getState();
       if (!state.control) slow = null;
-      applyState(state);
+      applyState(state, realDt * scale);
+      applyTags(state);
       applyTimer();
       if (state.rallyCount !== lastRallyCount) {
         lastRallyCount = state.rallyCount;
@@ -284,6 +344,7 @@
       serveBtn.removeEventListener('pointerdown', onServePointer);
       joystick.destroy();
       timerEl.remove();
+      tagLayer.remove();
       // ジオメトリ/マテリアル/テクスチャを解放(画面を行き来してもGPUメモリが増えないように)
       scene.traverse(obj => {
         if (obj.geometry) obj.geometry.dispose();
