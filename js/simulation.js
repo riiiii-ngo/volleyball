@@ -1257,6 +1257,8 @@
             right: { label: setChoice.zones.right.label, enabled: setChoice.zones.right.enabled }
           },
           active: setChoice.zone,
+          // 今選んでいるトスを打つ選手の id(頭の上に▼を出す)
+          targetId: (k => (k && setChoice.options[k] ? setChoice.options[k].p.id : null))(setChoice.zones[setChoice.zone].key),
           quality: setChoice.quality
         } : null,
         blockControl: blockControl,
