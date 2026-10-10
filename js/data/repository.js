@@ -19,7 +19,7 @@
  *
  * ソースが実装するメソッド(すべて Promise を返す):
  *   loadCharacters()        → Array<{ id, name, kana?, romaji?, rarity?, level?, position, number?, height?, stats,
- *                                     minStats? }>   stats は試合用8項目、minStats は ALL_STATS の Lv1 の値
+ *                                     minStats? }>   stats は試合用(STATS の10項目)、minStats は ALL_STATS の Lv1 の値
  *   loadTeams()             → Array<{ id, name, deckId?, deckSlots?, rotationStart?, members: Array<{ slot, characterId, playerCharacterId?, number? }> }>
  *                               自チーム('player')は deckId(使うデッキ)と deckSlots({ 試合の立ち位置: デッキの枠 })も返す
  *                               playerCharacterId はその枠の所持選手(player_characters)の ID
@@ -47,22 +47,11 @@
 (function (global) {
   'use strict';
 
-  // ステータス項目(表示順)。値は 1〜99、未設定は 50。
-  const STATS = Object.freeze([
-    { key: 'speed', label: 'スピード' },
-    { key: 'jump', label: 'ジャンプ' },
-    { key: 'power', label: 'パワー' },
-    { key: 'technique', label: 'テクニック' },
-    { key: 'receive', label: 'レシーブ' },
-    { key: 'block', label: 'ブロック' },
-    { key: 'toss', label: 'トス' },
-    { key: 'serve', label: 'サーブ' }
-  ]);
   const STAT_MIN = 1;
   const STAT_MAX = 99;
   const STAT_DEFAULT = 50;
 
-  // 選手マスタ・所持選手が持つ全ステータス(表示順)。試合で使うのは STATS の8項目だけ。
+  // 選手マスタ・所持選手が持つ全ステータス(表示順)。値は 1〜99、未設定は 50。
   const ALL_STATS = Object.freeze([
     { key: 'spike', label: 'スパイク' },
     { key: 'receive', label: 'レシーブ' },
@@ -75,6 +64,8 @@
     { key: 'jump', label: 'ジャンプ' },
     { key: 'technique', label: 'テクニック' }
   ]);
+  // 試合で使う・育成で上げられるステータス(全10項目。以前は spike・stamina を除く8項目だった)
+  const STATS = ALL_STATS;
 
   // ガチャの支払い方法(schema の currency_type)の表示名。item はアイテム名を使う。
   const CURRENCY_LABELS = Object.freeze({
@@ -96,7 +87,7 @@
     { key: 'se', label: 'SE', position: 'SE' },
     { key: 'li', label: 'LI', position: 'LI' }
   ].map(Object.freeze));
-  // 選手を本来のポジションと違う枠に置いた時、試合で使うステータス(8項目)に掛ける倍率
+  // 選手を本来のポジションと違う枠に置いた時、試合で使うステータス(10項目)に掛ける倍率
   const OFF_POSITION_RATE = 0.9;
 
   // 選手を売却した時にもらえるアイテム(レア度 → 経験値チケットLv1の枚数)
@@ -247,7 +238,7 @@
 
   // 画面・試合に渡す選手。所持選手は行のステータス + セーブの割り振り分、
   // 所持していない選手(相手チーム)はマスタの Lv1 の値で作る。
-  //   stats/baseStats/bonus は試合用の8項目(STATS)、allStats は全10項目(ALL_STATS)。
+  //   stats/baseStats/bonus は試合用(STATS)、allStats は全10項目(ALL_STATS。今は STATS と同じ項目)。
   function buildUnit(d, row, master, team) {
     const p = row ? progressOf(d, row) : { level: master.level, exp: 0, points: 0, bonus: {} };
     const baseStats = {};

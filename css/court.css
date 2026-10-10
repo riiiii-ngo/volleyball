@@ -276,3 +276,26 @@ body:has(.court-screen) .toast {
   top: calc(max(12px, env(safe-area-inset-top, 12px)) + 64px);
   bottom: auto;
 }
+
+/* 操作する場面(スロー中)の残り時間バー。画面の一番上に横いっぱい */
+.vb-control-timer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: rgba(7, 13, 36, 0.6);
+  pointer-events: none;
+  z-index: 11;
+}
+.vb-control-timer[hidden] { display: none; }
+.vb-control-timer-fill {
+  height: 6px;
+  background: var(--orange);
+  box-shadow: 0 0 8px rgba(255, 106, 0, 0.8);
+  transform-origin: left center;
+}
+.vb-control-timer.is-low .vb-control-timer-fill {
+  background: #ff3b3b;
+  box-shadow: 0 0 8px rgba(255, 59, 59, 0.8);
+}

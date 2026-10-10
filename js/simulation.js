@@ -22,6 +22,8 @@
  *     自チームが打つ時は残りの選手が打った選手の周りにカバーに入る。
  *   - 打球が向かってくると、反応時間の後、間に合う選手(ポジションの優先度込み)が落下点へ走る。
  *     触る高さ(レシーブは腰、トスは頭上)まで落ちてくるまでに飛びつける距離へ入れれば触れる。
+ *   - ジャンプ・レシーブ・全力の移動で疲れがたまり(スタミナが高いほどたまりにくい)、走る速さ・ジャンプ・
+ *     打球の速さ・狙いの正確さが下がる。点の間・セット間に回復する。
  *
  * 将来オンライン対戦にする場合は、この層が「権威のある状態」を持つ側(サーバー or ホスト)になり、
  * getState() のスナップショットを相手に送る、という使い方を想定している。
@@ -117,12 +119,26 @@
   const BLOCK_OUT_BASE = 0.15;
   const BLOCK_OVER_MARGIN = 0.1;     // 打球がブロックの手よりこれ以上高く通ると当たらない
 
+  // ---- 疲れ(0〜1。スタミナが高いほどたまりにくい) ----
+  // たまる量 × 選手の staminaRate(スタミナ50→1.0 / 80→0.64)。ラリー中にたまり、能力にはラリーの間に反映する。
+  const FATIGUE_JUMP = 0.01;         // ジャンプ1回(スパイク・ブロック・ジャンプサーブ)
+  const FATIGUE_DIG = 0.004;         // レシーブ1回(飛びついた時は2倍)
+  const FATIGUE_RUN = 0.0015;        // 全力で走った1mごと
+  const RECOVER_POINT = 0.005;       // 1点ごとに回復(コートの選手)
+  const RECOVER_BENCH = 0.03;        // 1点ごとに回復(リベロと交代してベンチにいる選手)
+  const RECOVER_SET_BREAK = 0.3;     // セット間に回復
+  // 疲れが1の時の能力の下がり方(疲れに比例)
+  const TIRED_SPEED = 0.1;           // 走る速さ −10%
+  const TIRED_JUMP = 0.2;            // ジャンプの高さ −20%(打点・ブロックの高さ)
+  const TIRED_POWER = 0.08;          // スパイク・サーブの速さ −8%
+  const TIRED_ERROR = 0.3;           // 狙いのブレ(スパイク・サーブ・レシーブ・トス) +30%
+
   // ステータス50・身長180cm相当(VolleyballStats.toPlayParams と同じ形)
   const DEFAULT_ABILITY = Object.freeze({
     speed: 4.3, reach: 0.85, jumpHeight: 0.75, attackReach: 3.14, blockTop: 3.08,
     spikeSpeed: 24, jumpServe: false, serveSpeed: 17,
     spikeError: 0.7, serveError: 0.65, passError: 0.9, tossError: 0.5,
-    blockReach: 0.55, blockPower: 50, attackPower: 50, toss: 50
+    blockReach: 0.55, blockPower: 50, attackPower: 50, toss: 50, staminaRate: 1
   });
 
   const ROLE_ORDER = ['S', 'OH', 'MB', 'OP', 'OH', 'MB']; // サーブ順の役割(5-1システム)
@@ -207,9 +223,10 @@
         touches: 0, lastToucher: null, mbCommit: null, quickPlan: null
       };
       cfg.members.forEach(m => {
+        const base = Object.assign({}, DEFAULT_ABILITY, m.ability || {});
         const p = {
           id: m.id, side: side, role: m.role, order: m.order,
-          ab: Object.assign({}, DEFAULT_ABILITY, m.ability || {}),
+          base: base, ab: Object.assign({}, base), fatigue: 0,
           x: 0, y: 0, z: 0, goal: null, moveSpeed: 0, jump: null,
           zone: null, slot: null, onCourt: false
         };
@@ -223,6 +240,28 @@
     }
     const teams = { near: makeTeam('near', config.teams.near), far: makeTeam('far', config.teams.far) };
     const allPlayers = teams.near.members.concat(teams.far.members);
+
+    // ---------- 疲れ ----------
+    function tire(p, amount) { p.fatigue = clamp(p.fatigue + amount * p.base.staminaRate, 0, 1); }
+    function recover(p, amount) { p.fatigue = clamp(p.fatigue - amount, 0, 1); }
+    // 疲れを能力に反映する(ラリーの途中では変えない)
+    function applyFatigue(p) {
+      const b = p.base, f = p.fatigue;
+      const jump = b.jumpHeight * (1 - TIRED_JUMP * f);
+      const err = 1 + TIRED_ERROR * f;
+      p.ab = Object.assign({}, b, {
+        speed: b.speed * (1 - TIRED_SPEED * f),
+        jumpHeight: jump,
+        attackReach: b.attackReach - (b.jumpHeight - jump),
+        blockTop: b.blockTop - (b.jumpHeight - jump) * 0.85,
+        spikeSpeed: b.spikeSpeed * (1 - TIRED_POWER * f),
+        serveSpeed: b.serveSpeed * (1 - TIRED_POWER * f),
+        spikeError: b.spikeError * err,
+        serveError: b.serveError * err,
+        passError: b.passError * err,
+        tossError: b.tossError * err
+      });
+    }
 
     // ローカル座標 ↔ ワールド座標
     function W(T, lx, dd) { return { x: T.s * lx, z: T.s * dd }; }
@@ -269,7 +308,7 @@
       p.moveSpeed = p.ab.speed * (speedMul || 1);
     }
     function moveLocal(p, spot, speedMul) { moveTo(p, Wp(teams[p.side], spot), speedMul); }
-    function startJump(p, at, up, h) { p.jump = { start: at, up: up, h: h }; }
+    function startJump(p, at, up, h) { p.jump = { start: at, up: up, h: h }; tire(p, FATIGUE_JUMP); }
     function airborne(p, at) { return !!p.jump && at >= p.jump.start && at < p.jump.start + 2 * p.jump.up; }
     function jumpY(p, at) {
       if (!p.jump) return 0;
@@ -283,6 +322,7 @@
           const dx = p.goal.x - p.x, dz = p.goal.z - p.z;
           const dist = Math.hypot(dx, dz);
           const step = p.moveSpeed * dt;
+          if (p.moveSpeed >= p.ab.speed * 0.95) tire(p, Math.min(dist, step) * FATIGUE_RUN);
           if (dist <= step) { p.x = p.goal.x; p.z = p.goal.z; p.goal = null; }
           else { p.x += dx / dist * step; p.z += dz / dist * step; }
         }
@@ -331,9 +371,11 @@
 
     // 操作中のチーム
     const target = { x: 0, z: 0 };  // サーブ・スパイクの狙い(相手コート)
-    let setChoice = null;           // トス方向の選択中 { zones, zone, quality }
+    let setChoice = null;           // トス方向の選択中 { zones, zone, quality, deadline }
     let aiming = false;             // 自チームのトスが上がって、スパイクの狙いを決めている間
+    let aimDeadline = 0;            //   打つ時刻
     let blockControl = false;       // 相手のトス〜スパイクの間、自チームのMBを左右に動かせる
+    let blockDeadline = 0;          //   ブロックに跳ぶ時刻
     if (control) {
       const t0 = W(teams[other(control)], 0, HALF_L / 2);
       target.x = t0.x; target.z = t0.z;
@@ -498,6 +540,7 @@
       p.x = hit.x; p.z = hit.z; p.goal = null;
       T.touches = 1;
       T.lastToucher = p;
+      tire(p, FATIGUE_DIG * (stretched ? 2 : 1));
       // 打球が速い・強いほど返球が乱れる
       const speed = Math.hypot(f.v.x, f.v.z);
       let factor;
@@ -585,7 +628,7 @@
 
       if (T.side === control) {
         const zones = uiZones(options);
-        setChoice = { zones: zones, zone: ['center', 'left', 'right'].find(z => zones[z].enabled) || 'left', quality: quality, options: options };
+        setChoice = { zones: zones, zone: ['center', 'left', 'right'].find(z => zones[z].enabled) || 'left', quality: quality, options: options, deadline: setAt };
       }
       schedule(setAt, sAt => setContact(T, plan, f, options, quality, sAt));
     }
@@ -710,7 +753,7 @@
       const hitP = posAt(f, hitT - at);
       if (f.attackKey !== 'quick') approach(atk, null, hitT, at, hitP);
       else { atk.goal = { x: hitP.x, z: hitP.z + T.s * 0.2 }; atk.moveSpeed = atk.ab.speed; }
-      if (T.side === control) aiming = true;
+      if (T.side === control) { aiming = true; aimDeadline = hitT; }
       schedule(hitT, aAt => {
         aiming = false;
         const ball = posAt(f, aAt - f.t0);
@@ -742,6 +785,7 @@
       if (mb) {
         if (D.side === control) {
           blockControl = true;
+          blockDeadline = jumpAt;
           schedule(jumpAt, jAt => {
             blockControl = false;
             if (!airborne(mb, jAt)) startJump(mb, jAt, BLOCK_UP, mb.ab.jumpHeight * 0.8);
@@ -1015,6 +1059,7 @@
       const Wt = teams[winner];
       const Lt = teams[other(winner)];
       Wt.points++;
+      allPlayers.forEach(p => recover(p, p.onCourt ? RECOVER_POINT : RECOVER_BENCH));
       if (servingSide !== winner) { // サイドアウト: ローテーションしてサーブ権を取る
         Wt.rot++;
         servingSide = winner;
@@ -1035,6 +1080,7 @@
           setNumber++;
           teams.near.points = 0; teams.far.points = 0;
           teams.near.rot = 0; teams.far.rot = 0;
+          allPlayers.forEach(p => recover(p, RECOVER_SET_BREAK));
           firstServeOfSet = other(firstServeOfSet); // セットごとに最初のサーブを交代
           servingSide = firstServeOfSet;
           scoreVersion++;
@@ -1051,6 +1097,7 @@
       flight = null;
       ballDead = null;
       rallyToken++;
+      allPlayers.forEach(applyFatigue);
       arrangeTeam(teams.near);
       arrangeTeam(teams.far);
       formation(teams[servingSide], true);
@@ -1084,11 +1131,13 @@
 
     // ---------- 毎フレーム更新 ----------
     // joystickValue: {x, y} 各 -1〜1
-    function update(dt, joystickValue) {
+    // inputDt: 狙いのマーカーを動かす時間(実時間)。スロー表示中も狙いは普段の速さで動かせるように、
+    //          試合の時間(dt)とは別に渡せる。省略時は dt。
+    function update(dt, joystickValue, inputDt) {
       const joy = joystickValue || { x: 0, y: 0 };
       time += dt;
       processEvents();
-      handleControls(dt, joy);
+      handleControls(dt, joy, inputDt == null ? dt : inputDt);
       updatePlayers(dt);
       if (flight) {
         ballSpin.x += dt * 9;
@@ -1096,7 +1145,7 @@
       }
     }
 
-    function handleControls(dt, joy) {
+    function handleControls(dt, joy, inputDt) {
       if (!control) return;
       const T = teams[control];
       if (setChoice) {
@@ -1107,8 +1156,8 @@
       if (canServe() || aiming) {
         const O = teams[other(control)];
         const sq = discToSquare(joy.x, joy.y);
-        target.x += sq.x * T.s * 4 * dt;
-        target.z += -sq.y * T.s * 4 * dt; // 上に倒すと奥へ
+        target.x += sq.x * T.s * 4 * inputDt;
+        target.z += -sq.y * T.s * 4 * inputDt; // 上に倒すと奥へ
         const loc = L(O, target.x, target.z);
         const w = W(O, clamp(loc.lx, -(HALF_W + 1), HALF_W + 1), clamp(loc.d, 0.3, HALF_L + 1));
         target.x = w.x; target.z = w.z;
@@ -1142,6 +1191,13 @@
       return sv ? { x: sv.x, y: HAND_H, z: sv.z - T.s * 0.3 } : { x: 0, y: HAND_H, z: 0 };
     }
 
+    function controlWindow() {
+      if (setChoice) return { kind: 'set', deadline: setChoice.deadline };
+      if (aiming) return { kind: 'aim', deadline: aimDeadline };
+      if (blockControl) return { kind: 'block', deadline: blockDeadline };
+      return null;
+    }
+
     function getState() {
       const ball = ballPos();
       const scoreOf = T => ({ points: T.points, sets: T.sets });
@@ -1156,7 +1212,7 @@
           const tz = p.onCourt ? ball.z : p.z;
           let yaw = Math.atan2(tx - p.x, tz - p.z);
           if (!p.onCourt) yaw = Math.atan2(-p.x, 0);
-          return { id: p.id, x: p.x, y: p.y, z: p.z, yaw: yaw, onCourt: p.onCourt, role: p.role, slot: p.slot };
+          return { id: p.id, x: p.x, y: p.y, z: p.z, yaw: yaw, onCourt: p.onCourt, role: p.role, slot: p.slot, fatigue: p.fatigue };
         }),
         canServe: canServe(),
         setChoice: setChoice ? {
@@ -1169,6 +1225,8 @@
           quality: setChoice.quality
         } : null,
         blockControl: blockControl,
+        // 時間に追われる操作(トス方向・スパイクの狙い・ブロック)の種類と締め切り(試合の時刻)。無ければ null
+        control: controlWindow(),
         phase: phase,
         servingSide: servingSide,
         setNumber: setNumber,

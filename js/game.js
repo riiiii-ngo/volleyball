@@ -4,10 +4,16 @@
  * モデル(court/players/ball)の配置、入力(joystick/ボタン)の配線、
  * そして毎フレーム VolleyballSimulation の状態を読んでメッシュに反映する。
  * ゲームルール・状態そのものは持たない(すべて VolleyballSimulation 側)。
+ * プレイヤーが操作する場面(トス方向・スパイクの狙い・ブロック)では、締め切りまでが実時間で
+ * CONTROL_SECONDS 秒になるように試合の時間をゆっくり進め(スロー)、画面上部に残り時間のバーを出す。
  * 画面を離れる時は戻り値の destroy() で描画ループ停止・WebGL 解放・DOM 撤去を行う。
  */
 (function (global) {
   'use strict';
+
+  // 操作する場面(トス方向・スパイクの狙い・ブロック)に使える実時間(秒)。この間はスローになる
+  const CONTROL_SECONDS = 2;
+  const MIN_TIME_SCALE = 0.05;
 
   function init(options) {
     const container = options.container;
@@ -141,6 +147,15 @@
     // ---------- ジョイスティック ----------
     const joystick = VolleyballJoystick.create({ parent: joystickParent });
 
+    // ---------- 操作の残り時間バー(画面上部) ----------
+    const timerEl = document.createElement('div');
+    timerEl.className = 'vb-control-timer';
+    timerEl.hidden = true;
+    const timerFill = document.createElement('div');
+    timerFill.className = 'vb-control-timer-fill';
+    timerEl.appendChild(timerFill);
+    joystickParent.appendChild(timerEl);
+
     // ---------- 試合ロジック(Simulation) ----------
     const simulation = VolleyballSimulation.create({
       dimensions: d,
@@ -203,15 +218,41 @@
         : (state.blockControl ? 'ブロック  左右に動かす' : ''));
     }
 
+    // スロー: 操作の締め切り(試合の時刻)までを、残りの実時間で割った速さで進める。
+    // 時間が来たら(締め切りに着いたら)等倍に戻る。
+    let slow = null; // { key, left: 残りの実時間(秒) }
+    function timeScale(state, realDt) {
+      const c = state.control;
+      if (!c) { slow = null; return 1; }
+      const key = c.kind + ':' + c.deadline;
+      if (!slow || slow.key !== key) slow = { key: key, left: CONTROL_SECONDS };
+      if (slow.left <= 0) return 1;
+      const scale = Math.min(1, Math.max(MIN_TIME_SCALE, (c.deadline - state.time) / slow.left));
+      slow.left -= realDt;
+      return scale;
+    }
+    function applyTimer() {
+      const show = !!slow && slow.left > 0;
+      timerEl.hidden = !show;
+      if (!show) return;
+      const r = slow.left / CONTROL_SECONDS;
+      timerFill.style.transform = 'scaleX(' + r.toFixed(3) + ')';
+      timerEl.classList.toggle('is-low', r < 0.35);
+    }
+
     let rafId = 0;
     let lastRallyCount = 0;
     let lastScoreVersion = -1;
+    let state = simulation.getState();
     function animate() {
       rafId = requestAnimationFrame(animate);
-      const dt = Math.min(clock.getDelta(), 0.1);
-      simulation.update(dt, joystick.value);
-      const state = simulation.getState();
+      const realDt = Math.min(clock.getDelta(), 0.1);
+      const scale = timeScale(state, realDt);
+      simulation.update(realDt * scale, joystick.value, realDt);
+      state = simulation.getState();
+      if (!state.control) slow = null;
       applyState(state);
+      applyTimer();
       if (state.rallyCount !== lastRallyCount) {
         lastRallyCount = state.rallyCount;
         if (onRallyEnd) onRallyEnd(state.lastRally, state);
@@ -229,6 +270,7 @@
       window.removeEventListener('resize', onResize);
       serveBtn.removeEventListener('click', onServe);
       joystick.destroy();
+      timerEl.remove();
       // ジオメトリ/マテリアル/テクスチャを解放(画面を行き来してもGPUメモリが増えないように)
       scene.traverse(obj => {
         if (obj.geometry) obj.geometry.dispose();

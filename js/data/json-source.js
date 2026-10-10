@@ -91,7 +91,8 @@
         height: row.height,
         stats: {
           speed: row.min_speed, jump: row.min_jump, power: row.min_power, technique: row.min_technique,
-          receive: row.min_receive, block: row.min_block, toss: row.min_toss, serve: row.min_serve
+          receive: row.min_receive, block: row.min_block, toss: row.min_toss, serve: row.min_serve,
+          spike: row.min_spike, stamina: row.min_stamina
         },
         minStats: {
           spike: row.min_spike, receive: row.min_receive, block: row.min_block, toss: row.min_toss, serve: row.min_serve,

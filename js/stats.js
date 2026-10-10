@@ -9,7 +9,8 @@
  *   - スパイク: 初速 19〜31 m/秒、サーブ: フローター 15〜21 m/秒 / ジャンプサーブ 20〜30 m/秒
  * 狙いの正確さは「ブレの標準偏差(m)」で表し、ステータスが高いほど小さい(狙った所に行く)。
  * block はブロックで塞げる幅・ブロックの高さ・当たった時の結果に、power はスパイクの速さと
- * ブロックに打ち勝つ力(ブロックアウト)に効く。
+ * ブロックに打ち勝つ力(ブロックアウト)に効く。spike はスパイクの速さ(power と半分ずつ)と
+ * 正確さ(technique と半分ずつ)に、stamina は試合中の疲れのたまりにくさに効く。
  */
 (function (global) {
   'use strict';
@@ -31,6 +32,7 @@
     const jump = 0.45 + stat(stats, 'jump') * 0.006;         // 垂直跳び(m) 50→0.75 / 90→0.99
     const serve = stat(stats, 'serve');
     const power = stat(stats, 'power');
+    const spike = stat(stats, 'spike');
     // サーブとパワーが高い選手はジャンプサーブ、それ以外はフローター
     const jumpServe = serve + power >= 130;
     return {
@@ -39,11 +41,11 @@
       jumpHeight: jump,
       attackReach: standingReach + jump,                     // スパイクの打点(m)  180cm・50→3.14
       blockTop: standingReach + jump * 0.85 + 0.05,          // ブロックの手の高さ(m)
-      spikeSpeed: 17 + power * 0.14,                         // スパイクの初速(m/秒) 50→24 / 80→28.2
+      spikeSpeed: 17 + (power + spike) / 2 * 0.14,           // スパイクの初速(m/秒) 50→24 / 80→28.2
       jumpServe: jumpServe,
       serveSpeed: jumpServe ? 14 + (serve + power) / 2 * 0.17 : 13 + serve * 0.08, // 65→25 / 50→17
       // ---- 狙いのブレ(標準偏差, m) ----
-      spikeError: 1.2 - stat(stats, 'technique') * 0.01,     // スパイク   50→0.7  / 70→0.5 / 99→0.21
+      spikeError: 1.2 - (stat(stats, 'technique') + spike) / 2 * 0.01, // スパイク 50→0.7 / 70→0.5 / 99→0.21
       serveError: 1.1 - serve * 0.009,                       // サーブ     50→0.65 / 70→0.47
       passError: 1.5 - stat(stats, 'receive') * 0.012,       // レシーブの返球 50→0.9 / 85→0.48
       tossError: 0.9 - stat(stats, 'toss') * 0.008,          // トス       50→0.5  / 80→0.26
@@ -52,7 +54,9 @@
       // ブロックの当たり判定で使う元の値(ブロッカーのブロック値 vs 攻撃者のパワー値)
       blockPower: stat(stats, 'block'),
       attackPower: power,
-      toss: stat(stats, 'toss')
+      toss: stat(stats, 'toss'),
+      // 疲れのたまりやすさ(1が基準)  50→1.0 / 65→0.82 / 80→0.64 / 99→0.41
+      staminaRate: Math.max(0.3, 1.6 - stat(stats, 'stamina') * 0.012)
     };
   }
 
